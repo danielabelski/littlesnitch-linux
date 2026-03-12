@@ -1,0 +1,4 @@
+# Test blocklist for hosts. Verify that the host static.kameleoon.com is
+# blocked by the filter.
+
+static.kameleoon.com

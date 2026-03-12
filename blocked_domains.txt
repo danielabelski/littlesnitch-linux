@@ -1,0 +1,6 @@
+# Test blocklist for domains. Check that only kameleoon.eu makes it into
+# the binary representation (because eu-data.kameleoon.eu is covered)
+# and verify that the host eu-data.kameleoon.eu is blocked by the filter.
+
+kameleoon.eu
+eu-data.kameleoon.eu

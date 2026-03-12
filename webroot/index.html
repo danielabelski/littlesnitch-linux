@@ -1,0 +1,181 @@
+<!-- SPDX-License-Identifier: GPL-2.0 -->
+<!-- Copyright (C) 2026 Objective Development Software GmbH -->
+
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Little Snitch for Linux</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="connections.css" />
+  <link rel="stylesheet" href="blocklists.css" />
+  <link rel="stylesheet" href="rules.css" />
+  <link rel="stylesheet" href="uPlot.min.css" />
+  <link rel="stylesheet" href="traffic.css" />
+</head>
+
+<body>
+  <!-- SVG symbols available throughout the app -->
+  <svg width="0" height="0" style="position: absolute; overflow: hidden;" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <symbol id="details-differ-red" viewBox="0 0 40 40">
+        <g transform="translate(3.9661017,14)" style="stroke:#d33;stroke-width:3.23161912;stroke-linecap:round">
+          <path d="M 8.5338983,-0.59181698 V 18.343556" />
+          <path d="m 2.8478983,11.219014 5.686,7.124542" />
+          <path d="M 14.219898,11.21914 8.5338983,18.343556" />
+        </g>
+      </symbol>
+      <symbol id="details-differ-green" viewBox="0 0 40 40">
+        <g transform="translate(3.9661017,14)" style="stroke:#2b2;stroke-width:3.23161912;stroke-linecap:round">
+          <path d="M 8.5338983,-0.59181698 V 18.343556" />
+          <path d="m 2.8478983,11.219014 5.686,7.124542" />
+          <path d="M 14.219898,11.21914 8.5338983,18.343556" />
+        </g>
+      </symbol>
+    </defs>
+  </svg>
+
+  <div class="app-shell">
+    <header class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab is-active" role="tab" aria-selected="true" data-section="connections">Connections</button>
+      <button class="tab" role="tab" aria-selected="false" data-section="blocklists">Blocklists</button>
+      <button class="tab" role="tab" aria-selected="false" data-section="rules">Rules</button>
+      <div class="offline-indicator" data-role="offline-indicator" hidden aria-live="polite">
+        Daemon offline — reconnecting…
+      </div>
+    </header>
+
+    <main>
+      <section class="section is-active" data-section="connections">
+        <div class="section-topbar">
+          <div class="control-group">
+            <div class="search-wrap">
+              <input class="search-input" type="search" placeholder="Filter connections..." data-role="search"
+                data-section="connections" />
+              <button class="search-clear-button" type="button" data-role="search-clear" aria-label="Clear search">
+                ×
+              </button>
+            </div>
+            <div class="connections-inline-filters">
+              <select class="menu-select compact" data-role="direction-filter" title="Direction filter">
+                <option value="both">In + Out</option>
+                <option value="out">Out only</option>
+                <option value="in">In only</option>
+              </select>
+              <select class="menu-select compact" data-role="location-filter" title="Location filter">
+                <option value="all">Internet + Local Networks</option>
+                <option value="internet">Internet only</option>
+                <option value="localnet">Local Networks only</option>
+                <option value="localhost">Local Host only</option>
+                <option value="everything">Everything</option>
+              </select>
+              <select class="menu-select compact" data-role="verdict-filter" title="Verdict filter">
+                <option value="any">Allowed + Denied</option>
+                <option value="allow">Allowed only</option>
+                <option value="deny">Denied only</option>
+              </select>
+              <select class="menu-select compact" data-role="visible-period-filter" title="Visible time period">
+                <option value="60">Show 1 minute</option>
+                <option value="600">Show 10 minutes</option>
+                <option value="3600">Show 1 hour</option>
+                <option value="21600">Show 6 hours</option>
+                <option value="86400">Show 1 day</option>
+                <option value="604800">Show 7 days</option>
+                <option value="2592000">Show 30 days</option>
+                <option value="none">Show all</option>
+              </select>
+            </div>
+
+            <span class="topbar-separator" aria-hidden="true"></span>
+            <select class="menu-select compact" data-role="connections-sort" title="Sort">
+              <option value="name">Sort by Name</option>
+              <option value="lastActivity">Sort by Activity</option>
+              <option value="totalData">Sort by Total Data</option>
+              <option value="totalDataSent">Sort by Data Sent</option>
+              <option value="totalDataReceived">Sort by Data Received</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="split-layout" data-section="connections">
+          <div class="pane left-pane" data-role="left-pane">
+            <div class="pane-title">Connection List</div>
+            <div class="pane-content list-container" data-role="list" id="connections-list"></div>
+          </div>
+          <div class="splitter" data-role="splitter" aria-hidden="true"></div>
+          <div class="pane right-pane" data-role="right-pane">
+            <div class="pane-title">Connection Details</div>
+            <div class="pane-content details-container" data-role="details" id="inspector">
+              <div id="rules"></div>
+            </div>
+          </div>
+        </div>
+        <div class="h-splitter" data-role="h-splitter" aria-hidden="true"></div>
+        <div class="traffic-chart-wrap" id="traffic-chart"></div>
+      </section>
+
+      <section class="section" data-section="blocklists">
+        <div class="section-topbar">
+          <div class="control-group">
+            <div class="search-wrap">
+              <input class="search-input" type="search" placeholder="Filter blocklists..." data-role="search"
+                data-section="blocklists" />
+              <button class="search-clear-button" type="button" data-role="search-clear" aria-label="Clear search">
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="split-layout" data-section="blocklists">
+          <div class="pane left-pane" data-role="left-pane">
+            <div class="pane-title">Blocklist List</div>
+            <div class="pane-content list-container" data-role="list" id="blocklists"></div>
+          </div>
+          <div class="splitter" data-role="splitter" aria-hidden="true"></div>
+          <div class="pane right-pane" data-role="right-pane">
+            <div class="pane-title">Blocklist Details</div>
+            <div class="pane-content details-container" data-role="details"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" data-section="rules">
+        <div class="section-topbar">
+          <div class="control-group">
+            <div class="search-wrap">
+              <input class="search-input" type="search" placeholder="Filter rules..." data-role="search"
+                data-section="rules" />
+              <button class="search-clear-button" type="button" data-role="search-clear" aria-label="Clear search">
+                ×
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="split-layout" data-section="rules">
+          <div class="pane left-pane" data-role="left-pane">
+            <div class="pane-title">Rule List</div>
+            <div class="pane-content list-container" data-role="list" id="rules-list"></div>
+          </div>
+          <div class="splitter" data-role="splitter" aria-hidden="true"></div>
+          <div class="pane right-pane" data-role="right-pane">
+            <div class="pane-title">Rule Details</div>
+            <div class="pane-content details-container" data-role="details" id="rules-details"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="uPlot.iife.min.js"></script>
+  <script src="traffic.js"></script>
+  <script src="connections.js"></script>
+  <script src="blocklists.js"></script>
+  <script src="rules.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>

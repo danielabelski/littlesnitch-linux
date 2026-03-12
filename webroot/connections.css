@@ -1,0 +1,304 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright (C) 2026 Objective Development Software GmbH */
+
+/* ------------------------------------------ */
+/* Row style */
+/* ------------------------------------------ */
+.row {
+  display: flex;
+  font-size: 14px;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border-bottom: 1px solid #e0e0e0;
+  background: var(--row-bg, #fff);
+  transition: height 0.5s ease, opacity 0.5s ease;
+}
+
+.row:hover {
+  background: #f5f5f5;
+}
+
+
+.row.selected {
+  background: #ddd;
+}
+
+/* ------------------------------------------ */
+/* Disclosure triangle */
+/* ------------------------------------------ */
+.disclosure {
+  width: 12px;
+  height: 12px;
+  margin-right: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transform-origin: 50% 50%;
+  transition: transform .5s ease;
+}
+
+.disclosure::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 5px solid #555;
+  transform: translate(-50%, -50%) rotate(-90deg);
+}
+
+.disclosure.expanded::before {
+  transform: translate(-50%, -50%);
+}
+
+.disclosure.spacer {
+  visibility: hidden;
+}
+
+/* ------------------------------------------ */
+/* Title – text‑truncation */
+/* ------------------------------------------ */
+.title {
+  padding: 3px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.title.clickable {
+  cursor: pointer;
+}
+
+.title.clickable:hover {
+  background: rgba(0, 0, 0, 0.08);
+  /* 8 % darkening */
+  border-radius: 4px;
+  /* round the edges */
+}
+
+/* ------------------------------------------ */
+/* Statistics */
+/* ------------------------------------------ */
+.total-bytes {
+  font-size: 12px;
+  padding: 3px 7px;
+  width: 6em;
+  flex-shrink: 0;
+  text-align: right;
+}
+
+.last-event {
+  font-size: 12px;
+  padding: 3px 7px;
+  width: 7em;
+  flex-shrink: 0;
+  text-align: right;
+  border-radius: 5px;
+}
+
+.last-event.recent-allow {
+  background: rgba(0, 160, 60, 0.15);
+}
+
+.last-event.recent-deny {
+  background: rgba(200, 0, 0, 0.13);
+}
+
+.last-event.recent-mixed {
+  background: rgba(180, 140, 0, 0.18);
+}
+
+/* ------------------------------------------ */
+/* Rule Button */
+/* ------------------------------------------ */
+.rule-button {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.rule-button:hover {
+  transform: scale(1.1);
+}
+
+.rule-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+.details-button {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.details-button:hover {
+  transform: scale(1.1) translate(0.5px, 0px);
+}
+
+.details-button svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* ------------------------------------------ */
+/* Inspector */
+/* ------------------------------------------ */
+.row-inspector .info-line {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+}
+
+.row-inspector .field {
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.row-inspector .value {
+  color: var(--text);
+}
+
+.row-inspector .domain-name {
+  font-weight: 600;
+}
+
+.row-inspector .path {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+.row-inspector .via {
+  color: var(--text-muted);
+}
+
+/* Container that holds all the rule lines */
+#rules {
+  font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+  line-height: 1.4;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.row-inspector {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 10px;
+}
+
+.covering-rules-headline,
+.related-rules-headline {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Individual parts of a rule line */
+.rule,
+.blocklist-entry {
+  margin: 0;
+  cursor: default;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 1px 0;
+}
+
+.emoji {
+  margin-right: 0;
+  font-size: 13px;
+}
+
+.process {
+  font-weight: 600;
+  margin-right: .3em;
+}
+
+.arrow {
+  margin: 0 .3em;
+}
+
+.host {
+  margin-right: .3em;
+}
+
+.proto {
+  color: var(--text-muted);
+}
+
+.rule.rule-link {
+  cursor: pointer;
+}
+
+.rule.rule-link:hover {
+  background: rgba(95, 122, 184, 0.12);
+  border-radius: 4px;
+}
+
+.blocklist-entry.blocklist-entry-link {
+  cursor: pointer;
+}
+
+.blocklist-entry.blocklist-entry-link:hover {
+  background: rgba(95, 122, 184, 0.12);
+  border-radius: 4px;
+}
+
+.rule-enable-checkbox {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 2px 0 0;
+  width: 1.2em;
+}
+
+.blocklist-item {
+  margin-right: .3em;
+}
+
+.list-info {
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.blocklist-names {
+  margin-top: .2em;
+  margin-left: 1.5em;
+  color: var(--text-muted);
+  display: none;
+}
+
+.blocklist-names li {
+  margin: .1em 0;
+}
+
+.inactive {
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.inactive .emoji {
+  font-size: 11px;
+}
+
+#rules input[type="checkbox"] {
+  accent-color: #a6afbd;
+}
