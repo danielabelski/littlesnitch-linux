@@ -23,6 +23,7 @@ Open Source.
 1. stable rust toolchains: `rustup toolchain install stable`
 1. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
 1. bpf-linker: `cargo install bpf-linker`
+1. the `clang` C/C++ compiler
 
 ## Build & Run
 
