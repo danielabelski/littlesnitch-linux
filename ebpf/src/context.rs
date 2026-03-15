@@ -101,18 +101,23 @@ impl StaticBuffers {
 }
 
 impl Context {
-    pub fn get(skb: SkBuff, is_inbound: bool) -> Self {
+    #[inline(always)]
+    pub fn get(skb: SkBuff, is_inbound: bool) -> Option<Self> {
         let group = if is_inbound {
             ConcurrencyGroup::CgroupSkbIn
         } else {
             ConcurrencyGroup::CgroupSkbOut
         };
-        Self {
+        let buffers = StaticBuffers::get(group);
+        if buffers.is_null() {
+            return None;
+        }
+        Some(Self {
             skb,
-            buffers: StaticBuffers::get(group),
+            buffers,
             timestamp: NanoTime(unsafe { bpf_ktime_get_coarse_ns() } as _),
             is_inbound,
-        }
+        })
     }
 
     // Access to static buffers. By making mutable static buffers available from an immutable

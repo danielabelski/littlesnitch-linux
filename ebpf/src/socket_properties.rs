@@ -15,6 +15,9 @@ pub fn socket_opened(cookie: u64) {
         return;
     }
     let buffers = StaticBuffers::get(crate::context::ConcurrencyGroup::CgroupSockCreate);
+    if buffers.is_null() {
+        return;
+    }
     unsafe {
         let socket_properties = &mut (*buffers).socket_properties;
         // Since we ignore `process_pair` in case of failure, we don't need to initialize.

@@ -304,7 +304,9 @@ fn handle_packet(ctx: SkBuffContext, is_inbound: bool) -> i32 {
         error!(ctx, "discarding packet type {:x}", ether_type);
         return SK_PASS as _; // ignore other packet types
     }
-    let ctx = Context::get(ctx.skb, is_inbound);
+    let Some(ctx) = Context::get(ctx.skb, is_inbound) else {
+        return SK_PASS as _;
+    };
     // We must be careful here: If we enumerate all result cases, the compiler finds out
     // that Verdict::Allow is the same as SK_PASS and Verdict::Deny the same as SK_DROP
     // and it just returns the raw value of the verdict.

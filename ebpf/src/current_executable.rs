@@ -47,6 +47,9 @@ pub fn report_exec_attempt_with_path(path: &path) {
     // unsafe { bpf_printk!(b"%d%d%d exec_with_path %pks", 1, 1, 1, (*path.dentry).d_name.name); }
     let path = Path::new(path);
     let buffers = StaticBuffers::get(ConcurrencyGroup::FentryExec);
+    if buffers.is_null() {
+        return;
+    }
     let mut node_cache = NodeCache::new(buffers);
     if let Some(node_id) = node_cache.node_id_for_path(path) {
         let pid = bpf_get_current_pid_tgid() as i32;

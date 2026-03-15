@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2026 Objective Development Software GmbH
 
-use core::num::NonZeroU64;
-use core::mem::transmute;
 use aya_ebpf::{helpers::generated::bpf_get_smp_processor_id, macros::map, maps::PerCpuArray};
+use core::mem::transmute;
+use core::num::NonZeroU64;
 
 #[map]
 static UNIQUE_ID_COUNTER: PerCpuArray<u64> = PerCpuArray::with_max_entries(10, 0);
@@ -19,7 +19,6 @@ pub enum Purpose {
 }
 
 impl UniqueId {
-
     pub fn new(purpose: Purpose) -> Self {
         let counter = UNIQUE_ID_COUNTER.get_ptr_mut(purpose as _).unwrap_or_default();
         UniqueId { counter }
@@ -34,7 +33,11 @@ impl UniqueId {
         // Add 1 to the CPU index to leave room for "user space" at index 0 and to ensure that
         // the value will never be 0, even though the maps are initialized to 0.
         let cpu_index = unsafe { bpf_get_smp_processor_id() } + 1;
-        let value = unsafe { (*self.counter << 16) | cpu_index as u64 };
+        let value = if self.counter.is_null() {
+            0
+        } else {
+            unsafe { (*self.counter << 16) | cpu_index as u64 }
+        };
         // use transmute to avoid any possible panics
         unsafe { transmute(value) }
     }
@@ -42,6 +45,8 @@ impl UniqueId {
     /// Increment the per-CPU counter so the next call to `get()` returns a fresh ID.
     /// Must be called exactly once after the ID returned by `get()` has been committed to a map.
     pub fn consume(&mut self) {
-        unsafe { *self.counter += 1 };
+        if !self.counter.is_null() {
+            unsafe { *self.counter += 1 };
+        }
     }
 }
