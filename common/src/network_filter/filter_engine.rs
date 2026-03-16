@@ -3,7 +3,7 @@
 
 use crate::{
     bpf_string::BpfString,
-    flow_types::{VerdictReason},
+    flow_types::VerdictReason,
     network_filter::{
         binary_rule::PortTableEntry,
         blocklist_matching::{blocklist_ipv4_match, blocklist_ipv6_match, blocklist_name_match},
@@ -68,11 +68,17 @@ pub trait FilterEngine: FilterModel + Sized {
         };
         if connection.is_ipv6_address() {
             if let Some(blocklist_match) = blocklist_ipv6_match(self, connection.ipv6_address()) {
-                search_spec.set_blocklist_match(meta.ip_blocklist_rule_id, VerdictReason::Ipv6Blocklist(blocklist_match));
+                search_spec.set_blocklist_match(
+                    meta.ip_blocklist_rule_id,
+                    VerdictReason::Ipv6Blocklist(blocklist_match),
+                );
             }
         } else {
             if let Some(blocklist_match) = blocklist_ipv4_match(self, connection.ipv4_address()) {
-                search_spec.set_blocklist_match(meta.ip_blocklist_rule_id, VerdictReason::Ipv4Blocklist(blocklist_match));
+                search_spec.set_blocklist_match(
+                    meta.ip_blocklist_rule_id,
+                    VerdictReason::Ipv4Blocklist(blocklist_match),
+                );
             }
         }
         if let Some(remote_name) = connection.remote_name() {
@@ -80,7 +86,8 @@ pub trait FilterEngine: FilterModel + Sized {
             if rule_id.supersedes(search_spec.benchmark_rule_id())
                 && let Some(blocklist_match) = blocklist_name_match(self, remote_name)
             {
-                search_spec.set_blocklist_match(rule_id, VerdictReason::NameBlocklist(blocklist_match));
+                search_spec
+                    .set_blocklist_match(rule_id, VerdictReason::NameBlocklist(blocklist_match));
             }
         }
         // We would like to pull constants like connection.remote_name(), connection.is_inbound(),
