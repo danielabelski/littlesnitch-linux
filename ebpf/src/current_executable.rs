@@ -9,7 +9,7 @@ use crate::{
 use aya_ebpf::{
     helpers::{bpf_get_current_pid_tgid, generated::bpf_get_current_task_btf},
     macros::map,
-    maps::{HashMap, PerCpuArray},
+    maps::{HashMap, LruHashMap},
 };
 use common::{
     NodeFeatures,
@@ -26,7 +26,7 @@ static NODE_FEATURES: HashMap<NodeId, NodeFeatures> = HashMap::with_max_entries(
 static PID_TO_NODE_ID: HashMap<i32, NodeId> = HashMap::with_max_entries(65536, 0);
 
 #[map]
-static RUNNING_EXEC_PARAMS: PerCpuArray<(i32, NodeId)> = PerCpuArray::with_max_entries(1, 0);
+static RUNNING_EXEC_PARAMS: LruHashMap<i32, NodeId> = LruHashMap::with_max_entries(512, 0);
 
 // All reports from the Linux kernel are with PID == thread PID, not main thread PID as
 // shown by `ps` in the shell. After a fork(), the distinction is not relevant because there
@@ -53,24 +53,18 @@ pub fn report_exec_attempt_with_path(path: &path) {
     let mut node_cache = NodeCache::new(buffers);
     if let Some(node_id) = node_cache.node_id_for_path(path) {
         let pid = bpf_get_current_pid_tgid() as i32;
-        if let Some(ptr) = RUNNING_EXEC_PARAMS.get_ptr_mut(0) {
-            unsafe {
-                *ptr = (pid, node_id);
-            }
-        }
+        _ = RUNNING_EXEC_PARAMS.insert(&pid, &node_id, 0);
     }
 }
 
 pub fn report_exec_success(return_value: i32) {
-    if let Some(ptr) = RUNNING_EXEC_PARAMS.get_ptr_mut(0) {
-        let pid = bpf_get_current_pid_tgid() as i32;
-        let entry = unsafe { &mut *ptr };
-        if pid == entry.0 && return_value == 0 {
-            _ = PID_TO_NODE_ID.insert(&entry.0, &entry.1, 0);
+    let pid = bpf_get_current_pid_tgid() as i32;
+    if let Some(node_id) = unsafe { RUNNING_EXEC_PARAMS.get(&pid) } {
+        if return_value == 0 {
+            _ = PID_TO_NODE_ID.insert(&pid, node_id, 0);
         }
-        *entry = (0, NodeId::error_id());
+        _ = RUNNING_EXEC_PARAMS.remove(&pid);
     }
-
 }
 
 pub fn report_sched_process_exec(old_pid: i32, new_pid: i32) {
