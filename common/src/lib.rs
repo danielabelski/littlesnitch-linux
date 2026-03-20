@@ -21,8 +21,7 @@ pub mod repeat;
 use bitset::BitSet;
 use core::{
     fmt::Debug,
-    ops::{Add, Sub},
-    ops::{Deref, DerefMut},
+    ops::{Add, AddAssign, Deref, DerefMut, Sub, SubAssign},
 };
 
 // We use the 0-byte internally as domain separator. This makes domain matching in blocklists
@@ -50,11 +49,23 @@ impl Add for NanoTime {
     }
 }
 
+impl AddAssign for NanoTime {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
 impl Sub for NanoTime {
     type Output = NanoTime;
 
     fn sub(self, rhs: Self) -> Self::Output {
         NanoTime(self.0 - rhs.0)
+    }
+}
+
+impl SubAssign for NanoTime {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
     }
 }
 
