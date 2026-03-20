@@ -132,6 +132,7 @@ Handled by `app.js` router:
 - `setConnectionsStatus`
 - `setTrafficData`
 - `updateTrafficData`
+- `setAboutInfo` — populates the About dialog (version, commits, copyright, website URL); handled in `app.js` by `handleSetAboutInfo()`
 
 ## Section Notes
 

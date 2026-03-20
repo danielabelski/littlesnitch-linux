@@ -45,10 +45,32 @@
       <button class="tab is-active" role="tab" aria-selected="true" data-section="connections">Connections</button>
       <button class="tab" role="tab" aria-selected="false" data-section="blocklists">Blocklists</button>
       <button class="tab" role="tab" aria-selected="false" data-section="rules">Rules</button>
-      <div class="offline-indicator" data-role="offline-indicator" hidden aria-live="polite">
-        Daemon offline — reconnecting…
+      <div class="tabs-right-group">
+        <div class="offline-indicator" data-role="offline-indicator" hidden aria-live="polite">
+          Daemon offline — reconnecting…
+        </div>
+        <button class="about-button" type="button" aria-label="About Little Snitch for Linux" data-role="about-button">About</button>
       </div>
     </header>
+
+    <dialog class="about-dialog" id="about-dialog" aria-label="About Little Snitch for Linux">
+      <div class="about-dialog-content">
+        <button class="about-close-button" type="button" aria-label="Close">×</button>
+        <img class="about-icon" src="littlesnitch-192.png" alt="Little Snitch for Linux icon" width="96" height="96" />
+        <h1 class="about-name">Little Snitch for Linux</h1>
+        <div class="about-version" data-role="about-version"></div>
+        <div class="about-commits">
+          <span class="about-commit-label">Main commit</span>
+          <span class="about-commit-value" data-role="about-main-commit" title="Main commit hash"></span>
+          <span class="about-commit-label">eBPF commit</span>
+          <span class="about-commit-value" data-role="about-ebpf-commit" title="eBPF commit hash"></span>
+        </div>
+        <div class="about-copyright" data-role="about-copyright"></div>
+        <a class="about-website" data-role="about-website" target="_blank" rel="noopener noreferrer" hidden></a>
+        <!-- Space reserved for future credits section -->
+        <section class="about-credits" hidden></section>
+      </div>
+    </dialog>
 
     <main>
       <section class="section is-active" data-section="connections">

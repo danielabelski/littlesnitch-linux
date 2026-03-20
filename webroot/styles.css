@@ -67,8 +67,14 @@ body {
   font-weight: 600;
 }
 
-.offline-indicator {
+.tabs-right-group {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.offline-indicator {
   align-self: center;
   padding: 4px 12px;
   border-radius: 20px;
@@ -77,6 +83,131 @@ body {
   color: #7a5800;
   font-size: 12px;
   font-weight: 500;
+}
+
+.about-button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.about-button:hover {
+  background: #ebf0fa;
+  color: var(--text);
+}
+
+/* About dialog */
+
+.about-dialog {
+  border: none;
+  border-radius: 16px;
+  padding: 0;
+  box-shadow: 0 8px 40px rgba(22, 32, 66, 0.18);
+  width: 380px;
+  max-width: 94vw;
+}
+
+.about-dialog::backdrop {
+  background: rgba(22, 32, 66, 0.35);
+}
+
+.about-dialog-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 36px 28px;
+  gap: 6px;
+  position: relative;
+}
+
+.about-close-button {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.about-close-button:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.about-icon {
+  width: 96px;
+  height: 96px;
+  margin-bottom: 10px;
+}
+
+.about-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 2px;
+  text-align: center;
+}
+
+.about-version {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.about-commits {
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: 10px;
+  row-gap: 3px;
+  align-items: baseline;
+  margin-bottom: 14px;
+}
+
+.about-commit-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+.about-commit-value {
+  font-size: 11px;
+  font-family: "Cascadia Code", "Fira Mono", "Consolas", monospace;
+  color: var(--text);
+  letter-spacing: 0.02em;
+}
+
+.about-copyright {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 4px;
+}
+
+.about-website {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+  margin-bottom: 4px;
+}
+
+.about-website:hover {
+  text-decoration: underline;
+}
+
+.about-credits {
+  width: 100%;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
 }
 
 main {

@@ -173,6 +173,9 @@
         case "updateTrafficData":
           window.handleUpdateTrafficData?.(msg);
           break;
+        case "setAboutInfo":
+          handleSetAboutInfo(msg);
+          break;
         default:
           console.warn("Unknown msg from server", JSON.stringify(msg));
       }
@@ -613,6 +616,58 @@
     });
   }
 
+  function handleSetAboutInfo(msg) {
+    const dialog = document.getElementById("about-dialog");
+    if (!dialog) {
+      return;
+    }
+    const set = (role, text) => {
+      const el = dialog.querySelector(`[data-role="${role}"]`);
+      if (el) {
+        el.textContent = text;
+      }
+    };
+    set("about-version", `Version ${msg.version}`);
+    set("about-main-commit", msg.mainCommit);
+    set("about-ebpf-commit", msg.ebpfCommit);
+    set("about-copyright", msg.copyright);
+    const link = dialog.querySelector('[data-role="about-website"]');
+    if (link instanceof HTMLAnchorElement) {
+      if (msg.websiteUrl) {
+        link.href = msg.websiteUrl;
+        link.textContent = msg.websiteUrl;
+        link.hidden = false;
+      } else {
+        link.hidden = true;
+      }
+    }
+  }
+
+  function setupAboutDialog() {
+    const dialog = document.getElementById("about-dialog");
+    if (!(dialog instanceof HTMLDialogElement)) {
+      return;
+    }
+    const button = document.querySelector('[data-role="about-button"]');
+    if (button) {
+      button.addEventListener("click", () => {
+        dialog.showModal();
+      });
+    }
+    const closeButton = dialog.querySelector(".about-close-button");
+    if (closeButton) {
+      closeButton.addEventListener("click", () => {
+        dialog.close();
+      });
+    }
+    // Close on backdrop click.
+    dialog.addEventListener("click", (event) => {
+      if (event.target === dialog) {
+        dialog.close();
+      }
+    });
+  }
+
   function setupSplitters() {
     const splitLayouts = Array.from(document.querySelectorAll(".split-layout"));
 
@@ -682,6 +737,7 @@
     setupPauseUpdatesPing();
     setupSplitters();
     setupOutsideClickClose();
+    setupAboutDialog();
   }
 
   init();
