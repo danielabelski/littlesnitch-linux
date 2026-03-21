@@ -10,6 +10,7 @@
   --text-muted: #5c6780;
   --accent: #0d6abf;
   --accent-soft: #e7f2fd;
+  --accent-border: #b8d5f4;
   --shadow: 0 4px 22px rgba(22, 32, 66, 0.08);
   /* Shared row/header tokens */
   --pane-hdr-h: 36px;
@@ -35,6 +36,7 @@ html.dark {
   --text-muted: #8891ab;
   --accent: #4d9de0;
   --accent-soft: #1a2d45;
+  --accent-border: #2e5a8a;
   --shadow: 0 4px 22px rgba(0, 0, 0, 0.4);
   --row-selected-bg: #1b3558;
   --row-selected-hover-bg: #1f3f6a;
@@ -152,6 +154,12 @@ body {
   font-weight: 500;
 }
 
+html.dark .offline-indicator {
+  background: #3a2e00;
+  border-color: #7a6200;
+  color: #f5c842;
+}
+
 .about-button {
   border: none;
   background: transparent;
@@ -174,13 +182,19 @@ body {
   border: none;
   border-radius: 16px;
   padding: 0;
-  box-shadow: 0 8px 40px rgba(22, 32, 66, 0.18);
+  box-shadow: var(--shadow);
+  background: var(--surface);
+  color: var(--text);
   width: 380px;
   max-width: 94vw;
 }
 
 .about-dialog::backdrop {
   background: rgba(22, 32, 66, 0.35);
+}
+
+html.dark .about-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
 }
 
 .about-dialog-content {

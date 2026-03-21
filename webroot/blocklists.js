@@ -282,10 +282,10 @@ function ensureUserEntriesDialog() {
   }
 
   const dialog = document.createElement('dialog');
-  dialog.className = 'blocklist-modal';
+  dialog.className = 'edit-dialog';
 
   const form = document.createElement('form');
-  form.className = 'blocklist-modal-form';
+  form.className = 'edit-dialog-form';
   form.method = 'dialog';
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -293,22 +293,22 @@ function ensureUserEntriesDialog() {
   });
 
   const title = document.createElement('h2');
-  title.className = 'blocklist-modal-title';
+  title.className = 'edit-dialog-title';
   title.textContent = 'Add Blocklist Entries';
   form.appendChild(title);
 
   const entriesLabel = document.createElement('label');
-  entriesLabel.className = 'blocklist-modal-label';
+  entriesLabel.className = 'edit-dialog-label';
   entriesLabel.textContent = 'Entries (one per line)';
   const entriesInput = document.createElement('textarea');
-  entriesInput.className = 'blocklist-modal-textarea';
+  entriesInput.className = 'edit-dialog-textarea';
   entriesInput.name = 'entries';
   entriesInput.rows = 10;
   entriesLabel.appendChild(entriesInput);
   form.appendChild(entriesLabel);
 
   const namesAreHostsLabel = document.createElement('label');
-  namesAreHostsLabel.className = 'blocklist-modal-checkbox-label';
+  namesAreHostsLabel.className = 'edit-dialog-checkbox-label';
   const namesAreHostsInput = document.createElement('input');
   namesAreHostsInput.type = 'checkbox';
   namesAreHostsInput.name = 'namesAreHosts';
@@ -317,22 +317,22 @@ function ensureUserEntriesDialog() {
   form.appendChild(namesAreHostsLabel);
 
   const error = document.createElement('div');
-  error.className = 'blocklist-modal-error';
+  error.className = 'edit-dialog-error';
   form.appendChild(error);
 
   const actions = document.createElement('div');
-  actions.className = 'blocklist-modal-actions';
+  actions.className = 'edit-dialog-actions';
 
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
-  cancelButton.className = 'blocklist-modal-button';
+  cancelButton.className = 'edit-dialog-button';
   cancelButton.textContent = 'Cancel';
   cancelButton.addEventListener('click', () => dialog.close());
   actions.appendChild(cancelButton);
 
   const addButton = document.createElement('button');
   addButton.type = 'submit';
-  addButton.className = 'blocklist-modal-button is-primary';
+  addButton.className = 'edit-dialog-button is-primary';
   addButton.textContent = 'Add';
   actions.appendChild(addButton);
 
@@ -450,10 +450,10 @@ function ensureAddBlocklistDialog() {
   }
 
   const dialog = document.createElement('dialog');
-  dialog.className = 'blocklist-modal';
+  dialog.className = 'edit-dialog';
 
   const form = document.createElement('form');
-  form.className = 'blocklist-modal-form';
+  form.className = 'edit-dialog-form';
   form.method = 'dialog';
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -461,15 +461,15 @@ function ensureAddBlocklistDialog() {
   });
 
   const title = document.createElement('h2');
-  title.className = 'blocklist-modal-title';
+  title.className = 'edit-dialog-title';
   title.textContent = 'Add Blocklist';
   form.appendChild(title);
 
   const nameLabel = document.createElement('label');
-  nameLabel.className = 'blocklist-modal-label';
+  nameLabel.className = 'edit-dialog-label';
   nameLabel.textContent = 'Name';
   const nameInput = document.createElement('input');
-  nameInput.className = 'blocklist-modal-input';
+  nameInput.className = 'edit-dialog-input';
   nameInput.type = 'text';
   nameInput.name = 'name';
   nameInput.required = true;
@@ -477,20 +477,20 @@ function ensureAddBlocklistDialog() {
   form.appendChild(nameLabel);
 
   const descriptionLabel = document.createElement('label');
-  descriptionLabel.className = 'blocklist-modal-label';
+  descriptionLabel.className = 'edit-dialog-label';
   descriptionLabel.textContent = 'Description';
   const descriptionInput = document.createElement('textarea');
-  descriptionInput.className = 'blocklist-modal-textarea';
+  descriptionInput.className = 'edit-dialog-textarea';
   descriptionInput.name = 'description';
   descriptionInput.rows = 3;
   descriptionLabel.appendChild(descriptionInput);
   form.appendChild(descriptionLabel);
 
   const urlLabel = document.createElement('label');
-  urlLabel.className = 'blocklist-modal-label';
+  urlLabel.className = 'edit-dialog-label';
   urlLabel.textContent = 'URL';
   const urlInput = document.createElement('input');
-  urlInput.className = 'blocklist-modal-input';
+  urlInput.className = 'edit-dialog-input';
   urlInput.type = 'url';
   urlInput.name = 'url';
   urlInput.required = true;
@@ -499,7 +499,7 @@ function ensureAddBlocklistDialog() {
   form.appendChild(urlLabel);
 
   const namesAreHostsLabel = document.createElement('label');
-  namesAreHostsLabel.className = 'blocklist-modal-checkbox-label';
+  namesAreHostsLabel.className = 'edit-dialog-checkbox-label';
   const namesAreHostsInput = document.createElement('input');
   namesAreHostsInput.type = 'checkbox';
   namesAreHostsInput.name = 'namesAreHosts';
@@ -508,31 +508,31 @@ function ensureAddBlocklistDialog() {
   form.appendChild(namesAreHostsLabel);
 
   const updatePeriodLabel = document.createElement('label');
-  updatePeriodLabel.className = 'blocklist-modal-label';
+  updatePeriodLabel.className = 'edit-dialog-label';
   updatePeriodLabel.textContent = 'Update Period';
   const updatePeriodSelect = document.createElement('select');
-  updatePeriodSelect.className = 'blocklist-modal-select';
+  updatePeriodSelect.className = 'edit-dialog-select';
   updatePeriodSelect.name = 'updatePeriodMinutes';
   updatePeriodLabel.appendChild(updatePeriodSelect);
   form.appendChild(updatePeriodLabel);
 
   const error = document.createElement('div');
-  error.className = 'blocklist-modal-error';
+  error.className = 'edit-dialog-error';
   form.appendChild(error);
 
   const actions = document.createElement('div');
-  actions.className = 'blocklist-modal-actions';
+  actions.className = 'edit-dialog-actions';
 
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
-  cancelButton.className = 'blocklist-modal-button';
+  cancelButton.className = 'edit-dialog-button';
   cancelButton.textContent = 'Cancel';
   cancelButton.addEventListener('click', () => dialog.close());
   actions.appendChild(cancelButton);
 
   const addButton = document.createElement('button');
   addButton.type = 'submit';
-  addButton.className = 'blocklist-modal-button is-primary';
+  addButton.className = 'edit-dialog-button is-primary';
   addButton.textContent = 'Add';
   actions.appendChild(addButton);
 
@@ -907,7 +907,7 @@ function renderBlocklist(blocklist) {
     updateMetaRow.appendChild(updateStatus);
 
     const enabledLabel = document.createElement('label');
-    enabledLabel.className = 'blocklist-modal-checkbox-label';
+    enabledLabel.className = 'edit-dialog-checkbox-label';
     enabledLabel.title = 'enabled';
     const enabledInput = document.createElement('input');
     enabledInput.type = 'checkbox';

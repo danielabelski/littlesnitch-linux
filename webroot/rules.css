@@ -54,7 +54,7 @@
   margin-left: 4px;
   vertical-align: baseline;
   font-size: var(--font-micro);
-  color: #9aa6be;
+  color: var(--text-muted);
   font-weight: 500;
   line-height: 1em;
   position: relative;
@@ -305,4 +305,22 @@
 
 .rule-inspector-save-button {
   margin-top: 8px;
+}
+
+html.dark .rule-row-btn-danger:hover {
+  background: #3d1212;
+  color: #f28b82;
+}
+
+html.dark .rules-search-highlight {
+  background: #4a3800;
+  color: inherit;
+}
+
+html.dark .rule-inspector-notes-input.is-search-match {
+  background: #3a3010;
+}
+
+html.dark .rules-sort-indicator {
+  color: var(--text-muted);
 }

@@ -258,31 +258,37 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 }
 
-.blocklist-modal {
+.edit-dialog {
   border: 1px solid var(--line);
   border-radius: 10px;
   box-shadow: var(--shadow);
+  background: var(--surface);
+  color: var(--text);
   padding: 0;
   width: min(480px, calc(100vw - 24px));
 }
 
-.blocklist-modal::backdrop {
+.edit-dialog::backdrop {
   background: rgba(22, 32, 66, 0.24);
 }
 
-.blocklist-modal-form {
+html.dark .edit-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.55);
+}
+
+.edit-dialog-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 14px;
 }
 
-.blocklist-modal-title {
+.edit-dialog-title {
   margin: 0;
   font-size: var(--font-dialog);
 }
 
-.blocklist-modal-label {
+.edit-dialog-label {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -290,7 +296,7 @@
   color: var(--text-muted);
 }
 
-.blocklist-modal-checkbox-label {
+.edit-dialog-checkbox-label {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -298,9 +304,9 @@
   color: var(--text);
 }
 
-.blocklist-modal-input,
-.blocklist-modal-select,
-.blocklist-modal-textarea {
+.edit-dialog-input,
+.edit-dialog-select,
+.edit-dialog-textarea {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 8px 10px;
@@ -309,24 +315,24 @@
   font: inherit;
 }
 
-.blocklist-modal-textarea {
+.edit-dialog-textarea {
   resize: vertical;
   min-height: 84px;
 }
 
-.blocklist-modal-error {
+.edit-dialog-error {
   min-height: 16px;
   font-size: var(--font-meta);
   color: #b13636;
 }
 
-.blocklist-modal-actions {
+.edit-dialog-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
 
-.blocklist-modal-button {
+.edit-dialog-button {
   border: 1px solid var(--line);
   background: var(--surface);
   color: var(--text);
@@ -335,12 +341,21 @@
   cursor: pointer;
 }
 
-.blocklist-modal-button:hover {
+.edit-dialog-button:hover {
   background: var(--surface-muted);
 }
 
-.blocklist-modal-button.is-primary {
+.edit-dialog-button.is-primary {
   background: var(--accent-soft);
-  border-color: #b8d5f4;
+  border-color: var(--accent-border);
   color: var(--accent);
+}
+
+html.dark .blocklist-entry-row.is-highlighted {
+  background: #3a3010;
+}
+
+html.dark .blocklist-update-row-error,
+html.dark .edit-dialog-error {
+  color: #f28b82;
 }

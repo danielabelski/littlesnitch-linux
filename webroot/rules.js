@@ -501,7 +501,7 @@ function renderRuleInspectorCard(rule) {
   notesBox.appendChild(notesInput);
   const notesSave = document.createElement('button');
   notesSave.type = 'button';
-  notesSave.className = 'blocklist-modal-button is-primary rule-inspector-save-button';
+  notesSave.className = 'edit-dialog-button is-primary rule-inspector-save-button';
   notesSave.textContent = 'Save Notes';
   notesSave.addEventListener('click', () => {
     saveRuleNotes(rule, notesInput.value);
@@ -664,10 +664,10 @@ function ensureRuleDialog() {
   }
 
   const dialog = document.createElement('dialog');
-  dialog.className = 'blocklist-modal';
+  dialog.className = 'edit-dialog';
 
   const form = document.createElement('form');
-  form.className = 'blocklist-modal-form';
+  form.className = 'edit-dialog-form';
   form.method = 'dialog';
   form.addEventListener('submit', (event) => {
     event.preventDefault();
@@ -675,7 +675,7 @@ function ensureRuleDialog() {
   });
 
   const title = document.createElement('h2');
-  title.className = 'blocklist-modal-title';
+  title.className = 'edit-dialog-title';
   title.textContent = 'Add Rule';
   form.appendChild(title);
 
@@ -685,19 +685,19 @@ function ensureRuleDialog() {
   form.appendChild(hiddenId);
 
   const primaryLabel = document.createElement('label');
-  primaryLabel.className = 'blocklist-modal-label';
+  primaryLabel.className = 'edit-dialog-label';
   primaryLabel.textContent = 'Primary executable (optional)';
   const primaryInput = document.createElement('input');
-  primaryInput.className = 'blocklist-modal-input';
+  primaryInput.className = 'edit-dialog-input';
   primaryInput.type = 'text';
   primaryLabel.appendChild(primaryInput);
   form.appendChild(primaryLabel);
 
   const viaLabel = document.createElement('label');
-  viaLabel.className = 'blocklist-modal-label';
+  viaLabel.className = 'edit-dialog-label';
   viaLabel.textContent = 'Via executable (optional)';
   const viaInput = document.createElement('input');
-  viaInput.className = 'blocklist-modal-input';
+  viaInput.className = 'edit-dialog-input';
   viaInput.type = 'text';
   viaLabel.appendChild(viaInput);
   form.appendChild(viaLabel);
@@ -706,29 +706,29 @@ function ensureRuleDialog() {
   actionDirectionRow.className = 'rule-modal-row';
 
   const actionLabel = document.createElement('label');
-  actionLabel.className = 'blocklist-modal-label rule-modal-half';
+  actionLabel.className = 'edit-dialog-label rule-modal-half';
   actionLabel.textContent = 'Action';
   const actionSelect = document.createElement('select');
-  actionSelect.className = 'blocklist-modal-input';
+  actionSelect.className = 'edit-dialog-input';
   actionSelect.innerHTML = '<option value="allow">Allow</option><option value="deny">Deny</option>';
   actionLabel.appendChild(actionSelect);
   actionDirectionRow.appendChild(actionLabel);
 
   const directionLabel = document.createElement('label');
-  directionLabel.className = 'blocklist-modal-label rule-modal-half';
+  directionLabel.className = 'edit-dialog-label rule-modal-half';
   directionLabel.textContent = 'Direction';
   const directionSelect = document.createElement('select');
-  directionSelect.className = 'blocklist-modal-input';
+  directionSelect.className = 'edit-dialog-input';
   directionSelect.innerHTML = '<option value="1">Out</option><option value="2">In</option><option value="3">Both</option>';
   directionLabel.appendChild(directionSelect);
   actionDirectionRow.appendChild(directionLabel);
   form.appendChild(actionDirectionRow);
 
   const remoteTypeLabel = document.createElement('label');
-  remoteTypeLabel.className = 'blocklist-modal-label';
+  remoteTypeLabel.className = 'edit-dialog-label';
   remoteTypeLabel.textContent = 'Remote type';
   const remoteTypeSelect = document.createElement('select');
-  remoteTypeSelect.className = 'blocklist-modal-input';
+  remoteTypeSelect.className = 'edit-dialog-input';
   remoteTypeSelect.innerHTML = [
     '<option value="1">Any server</option>',
     '<option value="2">Local network</option>',
@@ -740,12 +740,12 @@ function ensureRuleDialog() {
   form.appendChild(remoteTypeLabel);
 
   const remoteValueLabel = document.createElement('label');
-  remoteValueLabel.className = 'blocklist-modal-label rule-modal-collapsible';
+  remoteValueLabel.className = 'edit-dialog-label rule-modal-collapsible';
   const remoteValueTitle = document.createElement('span');
   remoteValueTitle.textContent = 'Remote Value';
   remoteValueLabel.appendChild(remoteValueTitle);
   const remoteValueInput = document.createElement('input');
-  remoteValueInput.className = 'blocklist-modal-input';
+  remoteValueInput.className = 'edit-dialog-input';
   remoteValueInput.type = 'text';
   remoteValueLabel.appendChild(remoteValueInput);
   form.appendChild(remoteValueLabel);
@@ -757,10 +757,10 @@ function ensureRuleDialog() {
   protocolPortRow.className = 'rule-modal-row';
 
   const protocolLabel = document.createElement('label');
-  protocolLabel.className = 'blocklist-modal-label rule-modal-half';
+  protocolLabel.className = 'edit-dialog-label rule-modal-half';
   protocolLabel.textContent = 'Protocol';
   const protocolSelect = document.createElement('select');
-  protocolSelect.className = 'blocklist-modal-input';
+  protocolSelect.className = 'edit-dialog-input';
   protocolSelect.innerHTML = [
     '<option value="31">Any</option>',
     '<option value="2">TCP</option>',
@@ -773,10 +773,10 @@ function ensureRuleDialog() {
   protocolPortRow.appendChild(protocolLabel);
 
   const portLabel = document.createElement('label');
-  portLabel.className = 'blocklist-modal-label rule-modal-half';
+  portLabel.className = 'edit-dialog-label rule-modal-half';
   portLabel.textContent = 'Ports (e.g. 22, 443, 8000-9000)';
   const portInput = document.createElement('input');
-  portInput.className = 'blocklist-modal-input';
+  portInput.className = 'edit-dialog-input';
   portInput.type = 'text';
   portInput.placeholder = 'Any';
   portLabel.appendChild(portInput);
@@ -787,10 +787,10 @@ function ensureRuleDialog() {
   priorityEnabledRow.className = 'rule-modal-row';
 
   const priorityLabel = document.createElement('label');
-  priorityLabel.className = 'blocklist-modal-label rule-modal-half';
+  priorityLabel.className = 'edit-dialog-label rule-modal-half';
   priorityLabel.textContent = 'Priority';
   const priorityInput = document.createElement('input');
-  priorityInput.className = 'blocklist-modal-input';
+  priorityInput.className = 'edit-dialog-input';
   priorityInput.type = 'number';
   priorityInput.min = '0';
   priorityInput.max = '255';
@@ -798,7 +798,7 @@ function ensureRuleDialog() {
   priorityEnabledRow.appendChild(priorityLabel);
 
   const enabledLabel = document.createElement('label');
-  enabledLabel.className = 'blocklist-modal-checkbox-label rule-modal-half rule-modal-checkbox';
+  enabledLabel.className = 'edit-dialog-checkbox-label rule-modal-half rule-modal-checkbox';
   const enabledInput = document.createElement('input');
   enabledInput.type = 'checkbox';
   enabledLabel.appendChild(enabledInput);
@@ -807,31 +807,31 @@ function ensureRuleDialog() {
   form.appendChild(priorityEnabledRow);
 
   const notesLabel = document.createElement('label');
-  notesLabel.className = 'blocklist-modal-label';
+  notesLabel.className = 'edit-dialog-label';
   notesLabel.textContent = 'Notes';
   const notesInput = document.createElement('textarea');
-  notesInput.className = 'blocklist-modal-textarea';
+  notesInput.className = 'edit-dialog-textarea';
   notesInput.rows = 3;
   notesLabel.appendChild(notesInput);
   form.appendChild(notesLabel);
 
   const error = document.createElement('div');
-  error.className = 'blocklist-modal-error';
+  error.className = 'edit-dialog-error';
   form.appendChild(error);
 
   const actions = document.createElement('div');
-  actions.className = 'blocklist-modal-actions';
+  actions.className = 'edit-dialog-actions';
 
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
-  cancelButton.className = 'blocklist-modal-button';
+  cancelButton.className = 'edit-dialog-button';
   cancelButton.textContent = 'Cancel';
   cancelButton.addEventListener('click', () => dialog.close());
   actions.appendChild(cancelButton);
 
   const saveButton = document.createElement('button');
   saveButton.type = 'submit';
-  saveButton.className = 'blocklist-modal-button is-primary';
+  saveButton.className = 'edit-dialog-button is-primary';
   saveButton.textContent = 'Save';
   actions.appendChild(saveButton);
 
