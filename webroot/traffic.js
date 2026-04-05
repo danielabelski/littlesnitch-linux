@@ -133,8 +133,8 @@
   // Pass null for both to clear the filter.
   function sendExplicitTimeFilterAction(startSecs, endSecs) {
     window.app?.sendAction("setExplicitTimeFilter", {
-      start_secs: startSecs,
-      end_inclusive_secs: endSecs,
+      startSecs: startSecs,
+      endInclusiveSecs: endSecs,
     });
   }
 
@@ -167,12 +167,94 @@
     sendExplicitTimeFilterAction(null, null);
   }
 
+  // uPlot fmtDate factory — called once per template string, returns a (Date)=>string.
+  // Preserves uPlot's tick-selection algorithm; only the rendering is locale-aware.
+  //
+  // Template tokens used by uPlot (uppercase = date, lowercase = time):
+  //   {YYYY}/{YY}   year          {M}/{MM}/{MMM}  month / abbrev-name  {D}/{DD}  day
+  //   {H}/{HH}      24 h hour     {h}             12 h hour
+  //   {mm}          minutes       {ss}  seconds   {fff}  milliseconds
+  //   {aa}/{AA}     am/pm
+  //   \n            separates primary label from secondary context label
+  //
+  function uplotFmtDate(tpl) {
+    const parts = tpl.split('\n');
+    const fns   = parts.map(fmtDatePart);
+    return d => fns.map(fn => fn(d)).join('\n');
+  }
+
+  function fmtDatePart(part) {
+    if (!part) return () => '';
+
+    const hasYear      = /\{Y/.test(part);
+    const hasMonth     = /\{M/.test(part);       // uppercase M
+    const hasDay       = /\{D/.test(part);
+    const hasHour      = /\{[hH]/.test(part);
+    const hasMin       = /\{mm\}/.test(part);    // lowercase mm = minutes
+    const hasSec       = /\{ss\}/.test(part);
+    const hasMillis    = /\{fff\}/.test(part);
+    const hasMonthName = /\{MMM\}/.test(part);
+
+    const wantsDate = hasYear || hasMonth || hasDay;
+    const wantsTime = hasHour || hasMin;
+
+    if (wantsDate && wantsTime) {
+      const showSec = hasSec || hasMillis;
+      return d => {
+        const p = getDtPrefs();
+        return _fmtDate(d, p) + ' ' + _fmtTime(d, p, showSec);
+      };
+    }
+
+    if (hasMonthName && !wantsTime)
+      return d => d.toLocaleDateString(undefined, { month: 'short' });
+
+    if (wantsDate) {
+      if (hasYear && !hasMonth && !hasDay)
+        return d => String(d.getFullYear());
+      if (!hasYear) {                             // month+day without year
+        return d => {
+          const prefs = getDtPrefs();
+          const m   = _pad(d.getMonth() + 1);
+          const day = _pad(d.getDate());
+          if (prefs.dateSep !== undefined)
+            return `${m}${prefs.dateSep}${day}`;  // ISO order matches _fmtDate override
+          const { order, sep } = _getLocaleDateFmt();
+          if (order === 'DMY') return `${day}${sep}${m}`;
+          return `${m}${sep}${day}`;
+        };
+      }
+      return d => _fmtDate(d, getDtPrefs());      // full date
+    }
+
+    if (!hasHour && !hasMin && hasSec) {          // continuation label ":{ss}[.{fff}]"
+      if (hasMillis)
+        return d => ':' + _pad(d.getSeconds()) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+      return d => ':' + _pad(d.getSeconds());
+    }
+
+    if (wantsTime) {
+      const showSec = hasSec || hasMillis;
+      return d => _fmtTime(d, getDtPrefs(), showSec);
+    }
+
+    return uPlot.fmtDate(part);                   // fallback for unexpected tokens
+  }
+
   function buildOpts(width, height) {
     const isRate = displayMode === "rate";
     const fmtY = isRate ? fmtRateAxis : fmtBytesAxis;
     const cs = getComputedStyle(document.documentElement);
     const textColor = cs.getPropertyValue("--text-muted").trim();
     const gridColor = cs.getPropertyValue("--line").trim();
+    const totalStroke   = cs.getPropertyValue("--traffic-total-stroke").trim();
+    const totalFill     = cs.getPropertyValue("--traffic-total-fill").trim();
+    const rxStroke      = cs.getPropertyValue("--traffic-rx-stroke").trim();
+    const rxFill        = cs.getPropertyValue("--traffic-rx-fill").trim();
+    const txStroke      = cs.getPropertyValue("--traffic-tx-stroke").trim();
+    const txFill        = cs.getPropertyValue("--traffic-tx-fill").trim();
+    const blockedStroke = cs.getPropertyValue("--traffic-blocked-stroke").trim();
+    const blockedFill   = cs.getPropertyValue("--traffic-blocked-fill").trim();
 
     const bytesSeries = isRate
       ? { paths: uPlot.paths.bars({ size: [1, Infinity] }), points: { show: false } }
@@ -181,6 +263,7 @@
     return {
       width,
       height,
+      fmtDate: uplotFmtDate,
       scales: {
         x: {},
         y:      { auto: false },
@@ -203,7 +286,7 @@
         {
           scale: "blocks",
           side: 1,
-          label: "Blocked",
+          label: t('traffic-blocked'),
           labelSize: 14,
           values: (_self, ticks) => ticks.map(v => v > 0 ? v.toFixed(0) : "0"),
           size: 50,
@@ -214,47 +297,38 @@
       ],
       series: [
         {
-          value: (_self, v) => {
-            if (v == null) return "--";
-            const d = new Date(v * 1000);
-            const date = d.getFullYear()
-              + "-" + String(d.getMonth() + 1).padStart(2, "0")
-              + "-" + String(d.getDate()).padStart(2, "0");
-            const time = String(d.getHours()).padStart(2, "0")
-              + ":" + String(d.getMinutes()).padStart(2, "0");
-            return date + " " + time;
-          },
+          value: (_self, v) => v == null ? "--" : formatDateTime(v, false, { hour12: false }),
         },
         {
-          label: "Total",
+          label: t('traffic-total'),
           scale: "y",
-          stroke: "rgba(120,130,150,0.6)",
-          fill: "rgba(120,130,150,0.15)",
+          stroke: totalStroke,
+          fill: totalFill,
           value: (_self, v) => v == null ? "--" : fmtY(v),
           ...bytesSeries,
           show: false,
         },
         {
-          label: "Received",
+          label: t('traffic-received'),
           scale: "y",
-          stroke: "rgba(74,144,217,0.8)",
-          fill: "rgba(74,144,217,0.2)",
+          stroke: rxStroke,
+          fill: rxFill,
           value: (_self, v) => v == null ? "--" : fmtY(v),
           ...bytesSeries,
         },
         {
-          label: "Sent",
+          label: t('traffic-sent'),
           scale: "y",
-          stroke: "rgba(142,68,173,0.8)",
-          fill: "rgba(142,68,173,0.2)",
+          stroke: txStroke,
+          fill: txFill,
           value: (_self, v) => v == null ? "--" : fmtY(v),
           ...bytesSeries,
         },
         {
-          label: "Blocked",
+          label: t('traffic-blocked'),
           scale: "blocks",
-          stroke: "rgba(192,57,43,0.8)",
-          fill: "rgba(192,57,43,0.35)",
+          stroke: blockedStroke,
+          fill: blockedFill,
           value: (_self, v) => v == null ? "--" : v.toFixed(0),
           paths: uPlot.paths.bars({ size: [1, Infinity] }),
           points: { show: false },
@@ -320,10 +394,15 @@
   function setupModeSelector(wrap) {
     const sel = document.createElement("select");
     sel.className = "traffic-mode-selector";
-    sel.innerHTML = `
-      <option value="total">Total bytes</option>
-      <option value="rate">Average rate</option>
-    `;
+    const optTotal = document.createElement("option");
+    optTotal.value = "total";
+    optTotal.dataset.i18n = "traffic-mode-total";
+    optTotal.textContent = t("traffic-mode-total");
+    const optRate = document.createElement("option");
+    optRate.value = "rate";
+    optRate.dataset.i18n = "traffic-mode-rate";
+    optRate.textContent = t("traffic-mode-rate");
+    sel.append(optTotal, optRate);
     sel.value = displayMode;
     sel.addEventListener("change", () => {
       displayMode = sel.value;
@@ -337,11 +416,20 @@
   // Called once from initChart(); elements persist across rebuildPlot() calls.
   function setupFilterControls(wrap) {
     // Badge overlaid on the traffic chart (to the left of the mode selector).
-    const badge = document.createElement("div");
+    const badge = document.createElement("button");
+    badge.type = "button";
     badge.className = "traffic-filter-badge";
     badge.hidden = true;
-    badge.innerHTML = `Time filter <button class="traffic-filter-cancel" type="button" aria-label="Remove time filter">\u00d7</button>`;
-    badge.querySelector(".traffic-filter-cancel").addEventListener("click", () => {
+    badge.setAttribute("aria-label", t("remove-time-filter"));
+    badge.dataset.i18nAriaLabel = "remove-time-filter";
+    const badgeText = document.createElement("span");
+    badgeText.dataset.i18n = "time-filter";
+    badgeText.textContent = t("time-filter");
+    const badgeX = document.createElement("span");
+    badgeX.setAttribute("aria-hidden", "true");
+    badgeX.textContent = "\u00d7";
+    badge.append(badgeText, badgeX);
+    badge.addEventListener("click", () => {
       clearExplicitTimeFilter();
     });
     wrap.appendChild(badge);
@@ -351,15 +439,46 @@
     const section = document.querySelector('.section[data-section="connections"]');
     const select = section?.querySelector('[data-role="visible-period-filter"]');
     if (select) {
-      const replacement = document.createElement("div");
-      replacement.className = "time-filter-indicator";
+      const replacement = document.createElement("button");
+      replacement.type = "button";
+      replacement.className = "filter-btn is-active time-filter-indicator";
       replacement.hidden = true;
-      replacement.innerHTML = `Time filter <button class="time-filter-cancel" type="button" aria-label="Remove time filter">\u00d7</button>`;
-      replacement.querySelector(".time-filter-cancel").addEventListener("click", () => {
+      replacement.setAttribute("aria-label", t("remove-time-filter"));
+      replacement.dataset.i18nAriaLabel = "remove-time-filter";
+      const replText = document.createElement("span");
+      replText.dataset.i18n = "time-filter";
+      replText.textContent = t("time-filter");
+      const replX = document.createElement("span");
+      replX.setAttribute("aria-hidden", "true");
+      replX.textContent = "\u00d7";
+      replacement.append(replText, replX);
+      replacement.addEventListener("click", () => {
         clearExplicitTimeFilter();
       });
       select.insertAdjacentElement("afterend", replacement);
       visiblePeriodReplacementEl = replacement;
+    }
+  }
+
+  function chartSize(element) {
+    // 1. Get the width including padding (clientWidth)
+    const clientWidth = element.clientWidth; 
+    const clientHeight = element.clientHeight 
+
+    // 2. Get the computed CSS styles
+    const style = window.getComputedStyle(element);
+
+    // 3. Parse the padding values (they come as strings like "20px")
+    const paddingLeft = parseFloat(style.paddingLeft);
+    const paddingRight = parseFloat(style.paddingRight);
+
+    const paddingTop = parseFloat(style.paddingTop);
+    const paddingBottom = parseFloat(style.paddingBottom);
+
+    // 4. Subtract them
+    return {
+      width: clientWidth - paddingLeft - paddingRight,
+      height: Math.max(60, clientHeight - paddingTop - paddingBottom - LEGEND_H)
     }
   }
 
@@ -372,10 +491,10 @@
       uplot.destroy();
       uplot = null;
     }
-    const w = wrap.clientWidth;
-    const h = Math.max(60, wrap.clientHeight - LEGEND_H);
+
+    const {width, height} = chartSize(wrap);
     const display = computeDisplayData();
-    uplot = new uPlot(buildOpts(w, h), display, wrap);
+    uplot = new uPlot(buildOpts(width, height), display, wrap);
     const { yMax, bMax } = computeTargetMaxes(display);
     animateToScale(yMax, bMax);
   }
@@ -387,18 +506,19 @@
     setupModeSelector(wrap);
     setupFilterControls(wrap);
 
-    const w = wrap.clientWidth;
-    const h = Math.max(60, wrap.clientHeight - LEGEND_H);
-    uplot = new uPlot(buildOpts(w, h), computeDisplayData(), wrap);
+    const {width, height} = chartSize(wrap);
+    const display = computeDisplayData();
+    uplot = new uPlot(buildOpts(width, height), display, wrap);
 
     const ro = new ResizeObserver(entries => {
       for (const entry of entries) {
         if (!uplot) continue;
-        const { width, height } = entry.contentRect;
+        const {width, height} = chartSize(entry.target);
+
         if (width > 10 && height > 10) {
           uplot.setSize({
-            width: Math.floor(width),
-            height: Math.floor(Math.max(60, height - LEGEND_H)),
+            width: width,
+            height: height
           });
         }
       }
@@ -485,4 +605,5 @@
 
   window.handleSetTrafficData = handleSetTrafficData;
   window.handleUpdateTrafficData = handleUpdateTrafficData;
+  window.rebuildTrafficPlot = () => { if (uplot) rebuildPlot(); };
 })();

@@ -6,6 +6,7 @@
 
   const state = {
     activeSection: "connections",
+    filterDisabled: false,
     connectionsFilters: {
       direction: "both",
       action: null,
@@ -29,6 +30,8 @@
   let pauseUpdatesLastSentAt = 0;
   let lastMouseMoveAt = 0;
   let isMouseInsideWindow = true;
+  let undoStack = [];
+  let undoTimerId = null;
 
   function setOfflineIndicator(isOffline) {
     const indicator = document.querySelector('[data-role="offline-indicator"]');
@@ -140,6 +143,9 @@
         case "updateRuleButtons":
           handleUpdateRuleButtons(msg.rows);
           break;
+        case "highlightRuleForRows":
+          highlightRuleButtons(msg.ids, msg.action);
+          break;
         case "trafficEvents":
           handleEvents(msg.data);
           break;
@@ -164,6 +170,9 @@
         case "setBlocklistEntryLocation":
           handleSetBlocklistEntryLocation(msg);
           break;
+        case "setBlocklistStatus":
+          handleSetBlocklistStatus(msg);
+          break;
         case "setConnectionsStatus":
           handleSetConnectionsStatus(msg);
           break;
@@ -176,22 +185,75 @@
         case "setAboutInfo":
           handleSetAboutInfo(msg);
           break;
+        case "setUndoStack":
+          handleSetUndoStack(msg);
+          break;
+        case "localizationTable":
+          setLocalizationTable(msg.table);
+          window.applyConnectionsSort?.();
+          window.rebuildTrafficPlot?.();
+          break;
+        case "globalSettings":
+          handleSetGlobalSettings(msg);
+          break;
         default:
           console.warn("Unknown msg from server", JSON.stringify(msg));
       }
     }
   }
 
+  function applyTheme(value) {
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const isDark = value === "dark" || (!value && systemDark);
+    document.documentElement.classList.toggle("dark", isDark);
+  }
+
+  function updateThemeMenu(value) {
+    const themeToggle = document.querySelector('button.theme-toggle');
+    if (themeToggle != null) {
+      const themeName = value ?? "automatic";
+      themeToggle.innerHTML = `<svg width=\"18\" height=\"18\" fill=\"currentColor\"><use href=\"#theme-${themeName}\"/></svg>`;
+    }
+    document.querySelectorAll('[data-role="theme-option"]').forEach((item) => {
+      item.classList.toggle("is-selected", item.dataset.value === (value ?? ""));
+    });
+  }
+
   function setupThemeToggle() {
     const btn = document.querySelector('[data-role="theme-toggle"]');
-    if (!btn) return;
+    const popup = document.querySelector('[data-role="theme-popup"]');
+    if (!btn || !popup) return;
+
     const stored = localStorage.getItem("theme");
-    if (stored === "dark") {
-      document.documentElement.classList.add("dark");
-    }
-    btn.addEventListener("click", () => {
-      const isDark = document.documentElement.classList.toggle("dark");
-      localStorage.setItem("theme", isDark ? "dark" : "light");
+    applyTheme(stored);
+    updateThemeMenu(stored);
+
+    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+      if (!localStorage.getItem("theme")) {
+        applyTheme(null);
+      }
+    });
+
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const shouldOpen = popup.hidden;
+      closeAllMenus();
+      popup.hidden = !shouldOpen;
+    });
+
+    popup.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const item = e.target.closest('[data-role="theme-option"]');
+      if (!item) return;
+      const value = item.dataset.value || null;
+      if (value) {
+        localStorage.setItem("theme", value);
+      } else {
+        localStorage.removeItem("theme");
+      }
+      applyTheme(value);
+      updateThemeMenu(value);
+      closeAllMenus();
     });
   }
 
@@ -324,7 +386,7 @@
     const inputs = Array.from(document.querySelectorAll('[data-role="search"]'));
     inputs.forEach((input) => {
       const updateFilteredState = () => {
-        input.classList.toggle("is-filtered", input.value.trim().length > 0);
+        input.parentNode.classList.toggle("is-filtered", input.value.trim().length > 0);
       };
       const applySearchQuery = (query) => {
         const section = input.dataset.section;
@@ -371,6 +433,14 @@
     });
   }
 
+  function setupBlocklistFilter() {
+    const checkbox = document.querySelector('[data-role="blocklist-disabled-only"]');
+    if (!(checkbox instanceof HTMLInputElement)) return;
+    checkbox.addEventListener("change", () => {
+      sendAction("setBlocklistFilter", { disabledEntriesOnly: checkbox.checked });
+    });
+  }
+
   function setupSortMenus() {
     const sortButtons = Array.from(document.querySelectorAll('[data-role="sort-toggle"]'));
 
@@ -407,6 +477,8 @@
 
         if (section === "connections") {
           menu.hidden = true;
+          setConnectionsSort(sortBy);
+          window.applyConnectionsSort?.();
           sendAction("setConnectionsSort", { sortBy });
         }
       });
@@ -473,7 +545,6 @@
       if (locationInput instanceof HTMLSelectElement) {
         const loc = state.connectionsFilters.location || "everything";
         const tempValues = ["internet-and-localhost", "invalid"];
-        const tempLabels = { "internet-and-localhost": "Internet + Local Host", "invalid": "(Invalid)" };
         // Remove temp options that are no longer needed
         tempValues.forEach((v) => {
           if (v !== loc) {
@@ -484,7 +555,7 @@
         if (tempValues.includes(loc) && !locationInput.querySelector(`option[value="${loc}"]`)) {
           const opt = document.createElement("option");
           opt.value = loc;
-          opt.textContent = tempLabels[loc];
+          opt.textContent = t(loc === 'internet-and-localhost' ? 'location-internet-and-local-host' : 'location-invalid');
           opt.dataset.temp = "1";
           locationInput.appendChild(opt);
         }
@@ -495,14 +566,22 @@
       }
       updateFilterChips();
     }
-    const sortSelect = document.querySelector('[data-role="connections-sort"]');
-    if (sortSelect instanceof HTMLSelectElement) {
-      sortSelect.value = state.connectionsSort || "name";
-    }
     const searchInput = document.querySelector('[data-role="search"][data-section="connections"]');
     if (searchInput instanceof HTMLInputElement && searchInput.value !== (state.connectionsSearchTerm || "")) {
       searchInput.value = state.connectionsSearchTerm || "";
-      searchInput.classList.toggle("is-filtered", searchInput.value.trim().length > 0);
+      searchInput.parentNode.classList.toggle("is-filtered", searchInput.value.trim().length > 0);
+    }
+  }
+
+  function handleSetBlocklistStatus(msg) {
+    const checkbox = document.querySelector('[data-role="blocklist-disabled-only"]');
+    if (checkbox instanceof HTMLInputElement) {
+      checkbox.checked = !!msg.disabledEntriesOnly;
+    }
+    const searchInput = document.querySelector('[data-role="search"][data-section="blocklists"]');
+    if (searchInput instanceof HTMLInputElement && searchInput.value !== (msg.searchTerm || "")) {
+      searchInput.value = msg.searchTerm || "";
+      searchInput.parentNode.classList.toggle("is-filtered", searchInput.value.trim().length > 0);
     }
   }
 
@@ -523,7 +602,7 @@
     state.connectionsSort = status.sortBy || "name";
     state.connectionsSearchTerm = status.searchTerm || "";
     applyConnectionsStatusToControls();
-    window.refreshConnectionsBytes?.();
+    window.applyConnectionsSort?.();
   }
 
   function updateFilterChips() {
@@ -603,12 +682,6 @@
       });
     });
 
-    const sortSelect = section.querySelector('[data-role="connections-sort"]');
-    if (sortSelect instanceof HTMLSelectElement) {
-      sortSelect.addEventListener("change", () => {
-        sendAction("setConnectionsSort", { sortBy: sortSelect.value });
-      });
-    }
   }
 
   function isTextEditingTarget(target) {
@@ -699,7 +772,7 @@
         el.textContent = text;
       }
     };
-    set("about-version", `Version ${msg.version}`);
+    set("about-version", t('about-version', { version: msg.version }));
     set("about-main-commit", msg.mainCommit);
     set("about-ebpf-commit", msg.ebpfCommit);
     set("about-copyright", msg.copyright);
@@ -713,6 +786,158 @@
         link.hidden = true;
       }
     }
+  }
+
+  function handleSetUndoStack(msg) {
+    undoStack = Array.isArray(msg.items) ? msg.items : [];
+    renderUndoWidget();
+    syncUndoTimer();
+  }
+
+  function renderUndoWidget() {
+    const widget = document.querySelector('[data-role="undo-widget"]');
+    if (!widget) return;
+    if (undoStack.length === 0) {
+      widget.hidden = true;
+      widget.classList.remove('is-bubble');
+      return;
+    }
+    const wasHidden = widget.hidden;
+    const wasBubble = widget.classList.contains('is-bubble');
+    widget.hidden = false;
+    const newest = undoStack[undoStack.length - 1];
+    const isBubble = (Math.floor(Date.now() / 1000) - newest.createdAt) < 10;
+
+    const capsule = widget.querySelector('[data-role="undo-bubble"]');
+    const labelEl = widget.querySelector('[data-role="undo-label"]');
+    if (capsule) capsule.dataset.itemId = String(newest.id);
+    if (labelEl) labelEl.textContent = newest.title;
+
+    if (isBubble) {
+      if (!wasHidden && wasBubble) {
+        // Restart entry animation: clear inline styles, reflow, re-apply.
+        if (capsule) capsule.style.animation = 'none';
+        if (labelEl) labelEl.style.animation = 'none';
+        void capsule?.offsetWidth;
+      }
+      widget.classList.add('is-bubble');
+      // Apply entry animations as inline styles, decoupled from is-bubble, so
+      // clearing them later lets the max-width transition fire on shrink.
+      if (capsule) capsule.style.animation = 'undo-capsule-enter 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 0.05s both';
+      if (labelEl) labelEl.style.animation = 'undo-label-enter 0.3s ease 0.48s both';
+    } else {
+      // Clear inline animations before removing is-bubble so the max-width
+      // transition can fire from the rule-based 240px value.
+      if (capsule) capsule.style.animation = '';
+      if (labelEl) labelEl.style.animation = '';
+      widget.classList.remove('is-bubble');
+    }
+
+    const popup = widget.querySelector('[data-role="undo-popup"]');
+    if (popup) {
+      const newestId = newest.id;
+      popup.replaceChildren(...undoStack.map((item) => {
+        const btn = document.createElement('button');
+        btn.className = 'menu-item';
+        btn.dataset.itemId = String(item.id);
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = item.title;
+        if (item.id === newestId) titleSpan.style.fontWeight = '600';
+        const ageSpan = document.createElement('span');
+        ageSpan.className = 'undo-item-age';
+        ageSpan.textContent = ageString(item.createdAt);
+        btn.append(titleSpan, ageSpan);
+        return btn;
+      }));
+    }
+  }
+
+  function syncUndoTimer() {
+    if (undoStack.length > 0 && undoTimerId === null) {
+      undoTimerId = setInterval(updateUndoAgeTick, 1000);
+    } else if (undoStack.length === 0 && undoTimerId !== null) {
+      clearInterval(undoTimerId);
+      undoTimerId = null;
+    }
+  }
+
+  function updateUndoAgeTick() {
+    if (undoStack.length === 0) return;
+    const widget = document.querySelector('[data-role="undo-widget"]');
+    if (!widget) return;
+    const newest = undoStack[undoStack.length - 1];
+    const isBubble = (Math.floor(Date.now() / 1000) - newest.createdAt) < 10;
+    widget.classList.toggle('is-bubble', isBubble);
+    const popup = widget.querySelector('[data-role="undo-popup"]');
+    if (popup && !popup.hidden) {
+      popup.querySelectorAll('.menu-item[data-item-id]').forEach((row, i) => {
+        const item = undoStack[i];
+        if (!item) return;
+        const ageEl = row.querySelector('.undo-item-age');
+        if (ageEl) ageEl.textContent = ageString(item.createdAt);
+      });
+    }
+  }
+
+  function setupUndoWidget() {
+    const widget = document.querySelector('[data-role="undo-widget"]');
+    if (!widget) return;
+
+    const capsule = widget.querySelector('[data-role="undo-bubble"]');
+    const popup = widget.querySelector('[data-role="undo-popup"]');
+
+    capsule?.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (widget.classList.contains('is-bubble')) {
+        const itemId = Number(capsule.dataset.itemId);
+        if (itemId) sendAction('undo', { itemId });
+      } else if (popup) {
+        const shouldOpen = popup.hidden;
+        closeAllMenus();
+        popup.hidden = !shouldOpen;
+        capsule.setAttribute('aria-expanded', String(!shouldOpen));
+      }
+    });
+    capsule?.addEventListener('click', (e) => e.stopPropagation());
+
+    popup?.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-item-id]');
+      if (!row) return;
+      const itemId = Number(row.dataset.itemId);
+      if (itemId) {
+        popup.hidden = true;
+        capsule?.setAttribute('aria-expanded', 'false');
+        sendAction('undo', { itemId });
+      }
+    });
+  }
+
+  function updateFilterSwitch(filterDisabled) {
+    const input = document.querySelector('[data-role="filter-switch-input"]');
+    if (input instanceof HTMLInputElement) {
+      input.checked = !filterDisabled;
+    }
+    const label = document.querySelector('[data-role="filter-switch"] .filter-switch-label');
+    if (label) {
+      label.textContent = filterDisabled ? t('filter-disabled') : t('filter-enabled');
+    }
+  }
+
+  function handleSetGlobalSettings(msg) {
+    state.filterDisabled = !!msg.filterDisabled;
+    updateFilterSwitch(state.filterDisabled);
+  }
+
+  function setupFilterSwitch() {
+    const input = document.querySelector('[data-role="filter-switch-input"]');
+    if (!(input instanceof HTMLInputElement)) return;
+    input.addEventListener('change', () => {
+      state.filterDisabled = !input.checked;
+      updateFilterSwitch(state.filterDisabled);
+      sendAction('setFilterDisabled', { filterDisabled: state.filterDisabled });
+    });
   }
 
   function setupAboutDialog() {
@@ -787,6 +1012,68 @@
       return state.connectionsSort;
     }
 
+    function setConnectionsSort(sortBy) {
+      state.connectionsSort = sortBy || 'name';
+    }
+
+    let currentSortPopupEl = null;
+
+    function showSortPopup(anchorEl, options, activeKey, onSelect) {
+      if (currentSortPopupEl) {
+        currentSortPopupEl.remove();
+        currentSortPopupEl = null;
+        return;
+      }
+
+      const popup = document.createElement('div');
+      popup.className = 'rules-sort-popup';
+      currentSortPopupEl = popup;
+
+      for (const option of options) {
+        const item = document.createElement('div');
+        item.className = 'rules-sort-popup-option';
+        if (option.key === activeKey) {
+          item.classList.add('is-active');
+        }
+        item.textContent = option.label;
+        item.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          onSelect(option.key);
+          popup.remove();
+          currentSortPopupEl = null;
+        });
+        popup.appendChild(item);
+      }
+
+      document.body.appendChild(popup);
+
+      const rect = anchorEl.getBoundingClientRect();
+      popup.style.top = `${rect.bottom}px`;
+      const popupWidth = popup.offsetWidth;
+      popup.style.left = `${Math.max(0, rect.right - popupWidth)}px`;
+
+      const dismissOnOutsideClick = (e) => {
+        if (!popup.contains(e.target)) {
+          popup.remove();
+          currentSortPopupEl = null;
+          document.removeEventListener('mousedown', dismissOnOutsideClick);
+          document.removeEventListener('keydown', dismissOnEscape);
+        }
+      };
+      const dismissOnEscape = (e) => {
+        if (e.key === 'Escape') {
+          popup.remove();
+          currentSortPopupEl = null;
+          document.removeEventListener('mousedown', dismissOnOutsideClick);
+          document.removeEventListener('keydown', dismissOnEscape);
+        }
+      };
+      setTimeout(() => {
+        document.addEventListener('mousedown', dismissOnOutsideClick);
+        document.addEventListener('keydown', dismissOnEscape);
+      }, 0);
+    }
+
     window.app = {
       sendAction,
       getSelectedConnectionRowId,
@@ -795,6 +1082,8 @@
       setSelectedBlocklistId,
       getUserBlocklistId,
       getConnectionsSort,
+      setConnectionsSort,
+      showSortPopup,
     };
   }
 
@@ -805,6 +1094,7 @@
     setupFilterControl();
     setupTabs();
     setupSearch();
+    setupBlocklistFilter();
     setupSortMenus();
     setupConnectionFilters();
     setupKeyboardNavigation();
@@ -812,6 +1102,8 @@
     setupSplitters();
     setupOutsideClickClose();
     setupAboutDialog();
+    setupUndoWidget();
+    setupFilterSwitch();
   }
 
   init();

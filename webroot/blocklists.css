@@ -4,7 +4,6 @@
 .blocklists-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
 .blocklist-pane-title {
@@ -20,15 +19,17 @@
 }
 
 .blocklist-add-button {
-  width: 24px;
-  height: 24px;
+  box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--surface);
   color: var(--text);
-  font-size: 18px;
+  font-size: var(--font-heading);
   line-height: 1;
   cursor: pointer;
+  padding: 0;
+  height: 20px;
+  width: 20px;
 }
 
 .blocklist-add-button:hover {
@@ -41,12 +42,25 @@
 }
 
 .blocklist-card {
+  box-sizing: border-box;
   border: none;
-  border-bottom: 1px solid var(--line);
-  border-radius: 0;
+  border-radius: 6px;
   background: transparent;
   padding: 10px 12px;
   cursor: pointer;
+}
+
+.blocklist-card + .blocklist-card::before {
+  content: '';
+  display: block;
+  height: 1px;
+  width: 100%;
+  background-color: transparent;
+  transform: translateY(-11px);
+}
+
+.blocklist-card:not(.is-selected) + .blocklist-card:not(.is-selected)::before {
+  background-color: var(--line);
 }
 
 .blocklist-card-headline {
@@ -58,38 +72,65 @@
 
 .blocklist-card-actions {
   display: flex;
-  gap: 6px;
+  align-items: center;
+  gap: 1px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 100ms ease;
 }
 
-.blocklist-card-action {
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  padding: 2px 6px;
-  font-size: var(--font-meta);
-  line-height: 1;
+.blocklist-card:hover .blocklist-card-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Keep action buttons hidden on disabled cards (overrides .is-disabled > * from styles.css);
+   the existing :hover rule above restores them on hover. */
+.is-disabled > .blocklist-card-actions {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.blocklist-card-btn {
+  border: none;
+  background: none;
   cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  font-size: var(--font-body);
+  color: var(--text-muted);
+  line-height: 1;
 }
 
-.blocklist-card-action:hover {
+.blocklist-card-btn:hover {
   background: var(--surface-muted);
+  color: var(--text);
 }
 
-.blocklist-card-action:disabled {
-  opacity: 0.4;
-  cursor: default;
+.blocklist-card-btn-danger:hover {
+  background: var(--danger-bg);
+  color: var(--danger-text);
 }
 
 .blocklist-card:hover {
   background: var(--row-hover-bg);
-  border-radius: 6px;
   border-bottom-color: transparent;
 }
 
 .blocklist-card.is-selected {
   background: var(--row-selected-bg);
-  border-radius: 6px;
   border-bottom-color: transparent;
+}
+
+.blocklist-card.is-selected:hover {
+  background: var(--row-selected-hover-bg);
+}
+
+.blocklist-card-checkbox {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  flex-shrink: 0;
 }
 
 .blocklist-name {
@@ -97,6 +138,7 @@
   font-size: var(--font-body);
   font-weight: 600;
   color: var(--text);
+  flex: 1;
 }
 
 .blocklist-description {
@@ -112,42 +154,10 @@
   -webkit-box-orient: vertical;
 }
 
-.blocklist-card.is-selected .blocklist-description {
-  overflow: visible;
-  text-overflow: initial;
-  display: block;
-  -webkit-line-clamp: unset;
-  -webkit-box-orient: initial;
-}
-
-.blocklist-source-row {
-  margin-top: 8px;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 6px;
-  font-size: var(--font-meta);
-}
-
-.blocklist-source-label {
-  color: var(--text-muted);
-  font-weight: 600;
-}
-
-.blocklist-source-url {
-  color: var(--text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
-  word-break: break-all;
-}
-
-.blocklist-update-row {
-  margin-top: 4px;
-  font-size: var(--font-meta);
-  color: var(--text);
-}
-
-.blocklist-update-row-error {
-  color: #b13636;
+.blocklist-update-row-error,
+.inspector-row.blocklist-update-row-error .inspector-key,
+.inspector-row.blocklist-update-row-error .inspector-value {
+  color: var(--error-text);
 }
 
 .blocklist-details {
@@ -170,6 +180,7 @@
   align-items: baseline;
   gap: 8px;
   margin-bottom: 2px;
+  margin-top: 32px;
 }
 
 .blocklist-detail-headline {
@@ -177,12 +188,12 @@
   font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
 }
 
 .blocklist-detail-count {
   font-size: var(--font-micro);
-  color: var(--text-muted);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .blocklist-update-meta-row {
@@ -211,33 +222,41 @@
 }
 
 .blocklist-entry-row {
-  display: grid;
-  grid-template-columns: 18px 1fr;
+  display: flex;
+  position: relative;
   align-items: center;
   gap: 6px;
   height: var(--row-h);
   min-height: var(--row-h);
   padding: 0 6px;
   font-size: var(--font-meta);
-  border-bottom: 1px solid var(--line);
   user-select: none;
   -webkit-user-select: none;
 }
 
-.blocklist-entry-row.is-selected {
-  background: var(--row-selected-bg);
+.blocklist-entry-row:hover {
+  background: var(--row-hover-bg);
   border-radius: 6px;
-  border-bottom-color: transparent;
 }
 
 .blocklist-entry-row.is-highlighted {
-  background: #fff4cf;
+  background: var(--locate-highlight-bg);
   border-radius: 6px;
-  border-bottom-color: transparent;
 }
 
-.blocklist-entry-row:last-child {
-  border-bottom: none;
+.blocklist-entry-row + .blocklist-entry-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: -0.5px;
+  display: block;
+  height: 1px;
+  width: 100%;
+  background-color: transparent;
+}
+
+.blocklist-entry-row:not(:hover):not(.is-selected) + .blocklist-entry-row:not(:hover):not(.is-selected)::before {
+  background-color: var(--line);
 }
 
 .blocklist-entry-row.is-placeholder {
@@ -248,14 +267,42 @@
   width: 14px;
   height: 14px;
   margin: 0;
-  accent-color: #a6afbd;
 }
 
 .blocklist-entry-title {
+  display: flex;
+  flex-grow: 1;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.blocklist-entry-value {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  flex: 1;
+  min-width: 0;
+}
+
+.blocklist-entry-title .list-info {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-family: var(--font-stack);
+  font-size: var(--font-meta);
+}
+
+.blocklist-entry-title .blocklist-names {
+  display: none;
+  margin-top: .2em;
+  margin-left: 1.5em;
+  padding: 0;
+  list-style: none;
+}
+
+.blocklist-entry-title .blocklist-names li {
+  margin: .1em 0;
 }
 
 .edit-dialog {
@@ -269,11 +316,7 @@
 }
 
 .edit-dialog::backdrop {
-  background: rgba(22, 32, 66, 0.24);
-}
-
-html.dark .edit-dialog::backdrop {
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--dialog-overlay);
 }
 
 .edit-dialog-form {
@@ -323,7 +366,7 @@ html.dark .edit-dialog::backdrop {
 .edit-dialog-error {
   min-height: 16px;
   font-size: var(--font-meta);
-  color: #b13636;
+  color: var(--error-text);
 }
 
 .edit-dialog-actions {
@@ -351,11 +394,60 @@ html.dark .edit-dialog::backdrop {
   color: var(--accent);
 }
 
-html.dark .blocklist-entry-row.is-highlighted {
-  background: #3a3010;
+
+/* Monospace URL value in blocklist properties card */
+.blocklist-inspector-url {
+  font-family: var(--font-mono);
+  word-break: break-all;
 }
 
-html.dark .blocklist-update-row-error,
-html.dark .edit-dialog-error {
-  color: #f28b82;
+/* Combined list card bleeds to full container width (negates the 3px list padding) */
+.blocklist-card.is-combined {
+  margin: 0;
+  padding-left: 15px;
+  padding-right: 15px;
+}
+
+/* Keep the bottom border visible on hover so it doesn't bleed into the separator */
+.blocklist-card.is-combined:hover {
+  border-bottom-color: var(--line);
+}
+
+/* Separator between the combined list and the other blocklists */
+.blocklist-section-separator {
+  height: 4px;
+  margin: 3px -3px;
+  background: var(--surface-muted);
+  border-bottom: 1px solid var(--line);
+}
+
+/* ── Card insert / remove animations ─────────────────── */
+@keyframes blocklist-card-enter {
+  from { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; }
+  to   { max-height: 120px; opacity: 1; padding-top: 10px; padding-bottom: 10px; }
+}
+
+@keyframes blocklist-card-exit {
+  from { max-height: 120px; opacity: 1; padding-top: 10px; padding-bottom: 10px; }
+  to   { max-height: 0; opacity: 0; padding-top: 0; padding-bottom: 0; }
+}
+
+.blocklist-card.is-card-added {
+  overflow: hidden;
+  animation: blocklist-card-enter 250ms ease-out both;
+}
+
+.blocklist-card.is-card-removing {
+  overflow: hidden;
+  animation: blocklist-card-exit 250ms ease-out both;
+}
+
+/* Spacing around the properties card inside the scroll container */
+.blocklist-properties-card {
+  margin-top: 6px;
+  margin-bottom: 6px;
+}
+
+.blocklist-properties-card .inspector-grid {
+  margin-top: 8px;
 }

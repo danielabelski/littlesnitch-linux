@@ -7,6 +7,8 @@ const VIRTUAL_PAGE_SIZE = 240;
 const VIRTUAL_MAX_IN_FLIGHT = 2;
 const detailsState = new Map(); // blocklistId -> { totalEntries, entries: Map<index, entry>, pending: Set<rangeKey> }
 const blocklistsById = new Map(); // blocklistId -> blocklist
+let previousBlocklistIds = null;
+let blocklistUpdateTimer = null;
 let activeVirtualList = null;
 let activeDetailsBlocklistId = null;
 let addBlocklistDialog = null;
@@ -23,16 +25,30 @@ let addUserEntriesDialog = null;
 let addUserEntriesError = null;
 let addUserEntriesText = null;
 let addUserEntriesNamesAreHosts = null;
-const selectedUserEntries = new Map(); // key -> { entryType, value }
-let userSelectionAnchorIndex = null;
+const userEntrySelection = createMultiSelection({
+  getCount: () => {
+    const d = ensureBlocklistDetails(getSelectedBlocklistId());
+    return d ? d.totalEntries : 0;
+  },
+  getItemByIndex: (i) => {
+    const d = ensureBlocklistDetails(getSelectedBlocklistId());
+    return d ? d.entries.get(i) : undefined;
+  },
+  getId: (entry) => entrySelectionKey(entry.entryType, entry.value),
+  onChanged: () => { refreshVirtualList(); setupBlocklistDetailsHeaderAddButton(); },
+});
 let highlightedEntry = null; // { blocklistId, entryType, value }
 let pendingLocateEntry = null; // { blocklistId, entryType, value, index, inFlight }
-const UPDATE_PERIOD_PRESET_OPTIONS = [
-  { minutes: 60, label: 'every hour' },
-  { minutes: 360, label: 'every 6 hours' },
-  { minutes: 1440, label: 'every day' },
-  { minutes: 10080, label: 'every week' },
-];
+let pendingAddedEntryValues = null; // Set<string> of values just submitted via addUserBlocklistEntries
+let pendingScrollToAdded = false; // scroll to the first newly added entry once
+function getUpdatePeriodPresetOptions() {
+  return [
+    { minutes: 60,    label: t('update-every-hour') },
+    { minutes: 360,   label: t('update-every-6-hours') },
+    { minutes: 1440,  label: t('update-every-day') },
+    { minutes: 10080, label: t('update-every-week') },
+  ];
+}
 
 function getUserBlocklistId() {
   if (window.app && typeof window.app.getUserBlocklistId === 'function') {
@@ -73,14 +89,14 @@ function setBlocklistsSearchQuery(query) {
   }
   const nextQuery = query || '';
   input.value = nextQuery;
-  input.classList.toggle('is-filtered', nextQuery.trim().length > 0);
+  input.parentNode.classList.toggle('is-filtered', nextQuery.trim().length > 0);
   if (window.app && typeof window.app.sendAction === 'function') {
     window.app.sendAction('setSearch', { query: nextQuery });
   }
 }
 
 function getEmptyEntriesText() {
-  return getBlocklistsSearchQuery().length > 0 ? 'No matching entries' : 'No entries';
+  return getBlocklistsSearchQuery().length > 0 ? t('empty-no-matching-entries') : t('empty-no-entries');
 }
 
 function getSelectedBlocklistId() {
@@ -121,9 +137,11 @@ function centerVirtualListOnIndex(ctx, index) {
   if (!ctx || !ctx.listEl || !Number.isFinite(index) || index < 0) {
     return;
   }
+  const headerHeight = ctx.headerEl ? ctx.headerEl.offsetHeight : 0;
   const targetTop = Math.max(
     0,
-    (index * VIRTUAL_ROW_HEIGHT)
+    headerHeight
+      + (index * VIRTUAL_ROW_HEIGHT)
       - (ctx.listEl.clientHeight / 2)
       + (VIRTUAL_ROW_HEIGHT / 2),
   );
@@ -265,13 +283,15 @@ function submitAddUserEntriesModal() {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
   if (entries.length === 0) {
-    setAddUserEntriesError('Add at least one entry.');
+    setAddUserEntriesError(t('err-add-at-least-one'));
     addUserEntriesText.focus();
     return;
   }
   const namesAreHosts = addUserEntriesNamesAreHosts.checked;
   if (window.app && typeof window.app.sendAction === 'function') {
     window.app.sendAction('addUserBlocklistEntries', { entries, namesAreHosts });
+    pendingAddedEntryValues = new Set(entries);
+    pendingScrollToAdded = true;
   }
   addUserEntriesDialog.close();
 }
@@ -294,12 +314,12 @@ function ensureUserEntriesDialog() {
 
   const title = document.createElement('h2');
   title.className = 'edit-dialog-title';
-  title.textContent = 'Add Blocklist Entries';
+  title.textContent = t('dlg-add-entries-title');
   form.appendChild(title);
 
   const entriesLabel = document.createElement('label');
   entriesLabel.className = 'edit-dialog-label';
-  entriesLabel.textContent = 'Entries (one per line)';
+  entriesLabel.textContent = t('dlg-entries-label');
   const entriesInput = document.createElement('textarea');
   entriesInput.className = 'edit-dialog-textarea';
   entriesInput.name = 'entries';
@@ -313,7 +333,7 @@ function ensureUserEntriesDialog() {
   namesAreHostsInput.type = 'checkbox';
   namesAreHostsInput.name = 'namesAreHosts';
   namesAreHostsLabel.appendChild(namesAreHostsInput);
-  namesAreHostsLabel.appendChild(document.createTextNode(' names are hosts, not domains'));
+  namesAreHostsLabel.appendChild(document.createTextNode(t('dlg-names-are-hosts')));
   form.appendChild(namesAreHostsLabel);
 
   const error = document.createElement('div');
@@ -326,14 +346,14 @@ function ensureUserEntriesDialog() {
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
   cancelButton.className = 'edit-dialog-button';
-  cancelButton.textContent = 'Cancel';
+  cancelButton.textContent = t('btn-cancel');
   cancelButton.addEventListener('click', () => dialog.close());
   actions.appendChild(cancelButton);
 
   const addButton = document.createElement('button');
   addButton.type = 'submit';
   addButton.className = 'edit-dialog-button is-primary';
-  addButton.textContent = 'Add';
+  addButton.textContent = t('btn-add');
   actions.appendChild(addButton);
 
   form.appendChild(actions);
@@ -371,8 +391,7 @@ function entrySelectionKey(entryType, value) {
 }
 
 function clearSelectedUserEntries() {
-  selectedUserEntries.clear();
-  userSelectionAnchorIndex = null;
+  userEntrySelection.clear();
 }
 
 function submitBlocklistModal() {
@@ -395,28 +414,31 @@ function submitBlocklistModal() {
     : 1440;
 
   if (name.length === 0) {
-    setAddBlocklistError('Name is required.');
+    setAddBlocklistError(t('err-name-required'));
     addBlocklistName.focus();
     return;
   }
   if (updateFromUrl.length === 0) {
-    setAddBlocklistError('URL is required.');
+    setAddBlocklistError(t('err-url-required'));
     addBlocklistUrl.focus();
     return;
   }
 
+  let parsedUrl;
   try {
-    const parsedUrl = new URL(updateFromUrl);
-    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-      throw new Error('Only HTTP(S) URLs are supported.');
-    }
+    parsedUrl = new URL(updateFromUrl);
   } catch (_error) {
-    setAddBlocklistError('Please enter a valid HTTP(S) URL.');
+    setAddBlocklistError(t('err-url-invalid'));
+    addBlocklistUrl.focus();
+    return;
+  }
+  if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'file:') {
+    setAddBlocklistError(t('err-url-http-only'));
     addBlocklistUrl.focus();
     return;
   }
   if (!Number.isFinite(updatePeriodMinutes) || updatePeriodMinutes <= 0) {
-    setAddBlocklistError('Please select a valid update period.');
+    setAddBlocklistError(t('err-update-period-invalid'));
     addBlocklistUpdatePeriod?.focus();
     return;
   }
@@ -462,12 +484,12 @@ function ensureAddBlocklistDialog() {
 
   const title = document.createElement('h2');
   title.className = 'edit-dialog-title';
-  title.textContent = 'Add Blocklist';
+  title.textContent = t('dlg-add-blocklist-title');
   form.appendChild(title);
 
   const nameLabel = document.createElement('label');
   nameLabel.className = 'edit-dialog-label';
-  nameLabel.textContent = 'Name';
+  nameLabel.textContent = t('dlg-name-label');
   const nameInput = document.createElement('input');
   nameInput.className = 'edit-dialog-input';
   nameInput.type = 'text';
@@ -478,7 +500,7 @@ function ensureAddBlocklistDialog() {
 
   const descriptionLabel = document.createElement('label');
   descriptionLabel.className = 'edit-dialog-label';
-  descriptionLabel.textContent = 'Description';
+  descriptionLabel.textContent = t('dlg-description-label');
   const descriptionInput = document.createElement('textarea');
   descriptionInput.className = 'edit-dialog-textarea';
   descriptionInput.name = 'description';
@@ -488,7 +510,7 @@ function ensureAddBlocklistDialog() {
 
   const urlLabel = document.createElement('label');
   urlLabel.className = 'edit-dialog-label';
-  urlLabel.textContent = 'URL';
+  urlLabel.textContent = t('dlg-url-label');
   const urlInput = document.createElement('input');
   urlInput.className = 'edit-dialog-input';
   urlInput.type = 'url';
@@ -504,12 +526,12 @@ function ensureAddBlocklistDialog() {
   namesAreHostsInput.type = 'checkbox';
   namesAreHostsInput.name = 'namesAreHosts';
   namesAreHostsLabel.appendChild(namesAreHostsInput);
-  namesAreHostsLabel.appendChild(document.createTextNode(' Treat as list of hostnames'));
+  namesAreHostsLabel.appendChild(document.createTextNode(t('dlg-treat-as-hostnames')));
   form.appendChild(namesAreHostsLabel);
 
   const updatePeriodLabel = document.createElement('label');
   updatePeriodLabel.className = 'edit-dialog-label';
-  updatePeriodLabel.textContent = 'Update Period';
+  updatePeriodLabel.textContent = t('dlg-update-period-label');
   const updatePeriodSelect = document.createElement('select');
   updatePeriodSelect.className = 'edit-dialog-select';
   updatePeriodSelect.name = 'updatePeriodMinutes';
@@ -526,14 +548,14 @@ function ensureAddBlocklistDialog() {
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
   cancelButton.className = 'edit-dialog-button';
-  cancelButton.textContent = 'Cancel';
+  cancelButton.textContent = t('btn-cancel');
   cancelButton.addEventListener('click', () => dialog.close());
   actions.appendChild(cancelButton);
 
   const addButton = document.createElement('button');
   addButton.type = 'submit';
   addButton.className = 'edit-dialog-button is-primary';
-  addButton.textContent = 'Add';
+  addButton.textContent = t('btn-add');
   actions.appendChild(addButton);
 
   form.appendChild(actions);
@@ -565,8 +587,8 @@ function openBlocklistModal(blocklist) {
   setAddBlocklistError('');
   if (blocklist) {
     editBlocklistId = blocklist.id;
-    addBlocklistTitle.textContent = 'Edit Blocklist';
-    addBlocklistConfirm.textContent = 'Save';
+    addBlocklistTitle.textContent = t('dlg-edit-blocklist-title');
+    addBlocklistConfirm.textContent = t('btn-save');
     addBlocklistName.value = blocklist.name || '';
     addBlocklistDescription.value = blocklist.description || '';
     addBlocklistUrl.value = blocklist.updateFromUrl || '';
@@ -574,8 +596,8 @@ function openBlocklistModal(blocklist) {
     setUpdatePeriodOptions(blocklist.updatePeriodMinutes);
   } else {
     editBlocklistId = null;
-    addBlocklistTitle.textContent = 'Add Blocklist';
-    addBlocklistConfirm.textContent = 'Add';
+    addBlocklistTitle.textContent = t('dlg-add-blocklist-title');
+    addBlocklistConfirm.textContent = t('btn-add');
     addBlocklistDialog.querySelector('form')?.reset();
     setUpdatePeriodOptions(1440);
   }
@@ -594,7 +616,7 @@ function setupBlocklistHeaderAddButton() {
   title.classList.add('blocklist-pane-title');
 
   const label = document.createElement('span');
-  label.textContent = title.textContent || 'Blocklist List';
+  label.textContent = title.textContent || t('blocklists-header');
   title.textContent = '';
   title.appendChild(label);
 
@@ -602,9 +624,9 @@ function setupBlocklistHeaderAddButton() {
   addButton.type = 'button';
   addButton.className = 'blocklist-add-button';
   addButton.setAttribute('data-role', 'add-blocklist');
-  addButton.setAttribute('aria-label', 'Add blocklist');
-  addButton.title = 'Add blocklist';
-  addButton.textContent = '+';
+  addButton.setAttribute('aria-label', t('btn-add-blocklist'));
+  addButton.title = t('btn-add-blocklist');
+  addButton.innerHTML = '<svg width="14" height="14" fill="currentColor"><use href="#btn-add"/></svg>';
   addButton.addEventListener('click', () => {
     openBlocklistModal(null);
   });
@@ -624,7 +646,7 @@ function setupBlocklistDetailsHeaderAddButton() {
     title.classList.add('blocklist-pane-title');
 
     const label = document.createElement('span');
-    label.textContent = title.textContent || 'Blocklist Details';
+    label.textContent = title.textContent || t('blocklist-details-header');
     title.textContent = '';
     title.appendChild(label);
 
@@ -637,9 +659,9 @@ function setupBlocklistDetailsHeaderAddButton() {
     addButton.type = 'button';
     addButton.className = 'blocklist-add-button';
     addButton.setAttribute('data-role', 'add-user-entries');
-    addButton.setAttribute('aria-label', 'Add entries');
-    addButton.title = 'Add entries';
-    addButton.textContent = '+';
+    addButton.setAttribute('aria-label', t('btn-add-entries'));
+    addButton.title = t('btn-add-entries');
+    addButton.innerHTML = '<svg width="14" height="14" fill="currentColor"><use href="#btn-add"/></svg>';
     addButton.hidden = true;
     addButton.addEventListener('click', () => {
       openUserEntriesModal();
@@ -650,19 +672,24 @@ function setupBlocklistDetailsHeaderAddButton() {
     removeButton.type = 'button';
     removeButton.className = 'blocklist-add-button';
     removeButton.setAttribute('data-role', 'remove-user-entries');
-    removeButton.setAttribute('aria-label', 'Remove selected entries');
-    removeButton.title = 'Remove selected entries';
-    removeButton.textContent = '-';
+    removeButton.setAttribute('aria-label', t('btn-remove-entries'));
+    removeButton.title = t('btn-remove-entries');
+    removeButton.innerHTML = '<svg width="18" height="18" fill="currentColor"><use href="#btn-remove"/></svg>';
     removeButton.hidden = true;
     removeButton.disabled = true;
     removeButton.addEventListener('click', () => {
-      if (selectedUserEntries.size === 0) {
+      if (userEntrySelection.size === 0) {
         return;
       }
       if (window.app && typeof window.app.sendAction === 'function') {
-        window.app.sendAction('removeUserBlocklistEntries', {
-          entries: Array.from(selectedUserEntries.values()),
-        });
+        const selectedIds = userEntrySelection.getAll();
+        const d = ensureBlocklistDetails(getSelectedBlocklistId());
+        const entries = d
+          ? Array.from(d.entries.values())
+              .filter((e) => selectedIds.has(entrySelectionKey(e.entryType, e.value)))
+              .map((e) => ({ entryType: e.entryType, value: e.value }))
+          : [];
+        window.app.sendAction('removeUserBlocklistEntries', { entries });
       }
       clearSelectedUserEntries();
       refreshVirtualList();
@@ -674,7 +701,7 @@ function setupBlocklistDetailsHeaderAddButton() {
   const visible = isUserBlocklistSelected();
   addButton.hidden = !visible;
   removeButton.hidden = !visible;
-  removeButton.disabled = selectedUserEntries.size === 0;
+  removeButton.disabled = userEntrySelection.size === 0;
 }
 
 function formatEntryTitle(entry) {
@@ -686,18 +713,7 @@ function formatEntryTitle(entry) {
 }
 
 function formatLocalTime(secondsSinceEpoch) {
-  const seconds = Number(secondsSinceEpoch);
-  if (!Number.isFinite(seconds) || seconds <= 0) {
-    return '';
-  }
-  const date = new Date(seconds * 1000);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'medium',
-  }).format(date);
+  return formatDateTime(Number(secondsSinceEpoch));
 }
 
 function normalizeUpdatePeriodMinutes(value) {
@@ -711,25 +727,23 @@ function normalizeUpdatePeriodMinutes(value) {
 function formatUpdatePeriodForDisplay(minutesValue) {
   const minutes = normalizeUpdatePeriodMinutes(minutesValue);
   if (minutes === 60) {
-    return 'every hour';
+    return t('update-every-hour');
   }
   if (minutes === 360) {
-    return 'every 6 hours';
+    return t('update-every-6-hours');
   }
   if (minutes === 1440) {
-    return 'every day';
+    return t('update-every-day');
   }
   if (minutes === 10080) {
-    return 'every week';
+    return t('update-every-week');
   }
   if (minutes < 120) {
-    return `every ${minutes} minutes`;
+    return t('update-every-minutes', { n: minutes });
   } else if (minutes < 2880) {
-    let hours = Math.round(minutes / 60);
-    return `every ${hours} hours`;
+    return t('update-every-hours', { n: Math.round(minutes / 60) });
   } else {
-    let days = Math.round(minutes / 1440);
-    return `every ${days} days`;
+    return t('update-every-days', { n: Math.round(minutes / 1440) });
   }
 }
 
@@ -740,8 +754,9 @@ function setUpdatePeriodOptions(selectedMinutesValue) {
   const selectedMinutes = normalizeUpdatePeriodMinutes(selectedMinutesValue);
   addBlocklistUpdatePeriod.innerHTML = '';
 
-  const presetMinutes = new Set(UPDATE_PERIOD_PRESET_OPTIONS.map((option) => option.minutes));
-  UPDATE_PERIOD_PRESET_OPTIONS.forEach((option) => {
+  const presetOptions = getUpdatePeriodPresetOptions();
+  const presetMinutes = new Set(presetOptions.map((option) => option.minutes));
+  presetOptions.forEach((option) => {
     const optionEl = document.createElement('option');
     optionEl.value = String(option.minutes);
     optionEl.textContent = option.label;
@@ -804,13 +819,49 @@ function renderBlocklist(blocklist) {
   if (blocklist.id === getSelectedBlocklistId()) {
     container.classList.add('is-selected');
   }
+  if (blocklist.disabled === true) {
+    container.classList.add('is-disabled');
+  }
 
   const headlineRow = document.createElement('div');
   headlineRow.className = 'blocklist-card-headline';
 
+  const enabledCheckbox = document.createElement('input');
+  enabledCheckbox.type = 'checkbox';
+  enabledCheckbox.className = 'blocklist-card-checkbox';
+  enabledCheckbox.checked = blocklist.disabled !== true;
+  enabledCheckbox.disabled = blocklist.id < 0;
+  enabledCheckbox.title = blocklist.disabled !== true ? t('enabled') : t('disabled');
+  enabledCheckbox.addEventListener('click', (event) => {
+    event.stopPropagation();
+  });
+  enabledCheckbox.addEventListener('change', (event) => {
+    event.stopPropagation();
+    if (blocklist.id < 0) {
+      return;
+    }
+    blocklist.disabled = !enabledCheckbox.checked;
+    const knownBlocklist = blocklistsById.get(blocklist.id);
+    if (knownBlocklist) {
+      knownBlocklist.disabled = blocklist.disabled;
+    }
+    if (window.app && typeof window.app.sendAction === 'function') {
+      window.app.sendAction('setBlocklistDisabled', {
+        blocklistId: blocklist.id,
+        isDisabled: !enabledCheckbox.checked,
+      });
+    }
+  });
+  headlineRow.appendChild(enabledCheckbox);
+
   const name = document.createElement('div');
   name.className = 'blocklist-name';
-  name.textContent = blocklist.name;
+  if (blocklist.lastUpdateError) {
+    name.classList.add('blocklist-update-row-error');
+    name.textContent = blocklist.name + ' (update failed)';
+  } else {
+    name.textContent = blocklist.name;
+  }
   headlineRow.appendChild(name);
 
   const actions = document.createElement('div');
@@ -819,9 +870,9 @@ function renderBlocklist(blocklist) {
   if (blocklist.id >= 0) {
     const editButton = document.createElement('button');
     editButton.type = 'button';
-    editButton.className = 'blocklist-card-action';
-    editButton.title = 'Edit blocklist';
-    editButton.textContent = '✏️';
+    editButton.className = 'blocklist-card-btn';
+    editButton.title = t('btn-edit-blocklist');
+    editButton.textContent = '✎';
     editButton.addEventListener('click', (event) => {
       event.stopPropagation();
       openBlocklistModal(blocklist);
@@ -830,14 +881,11 @@ function renderBlocklist(blocklist) {
 
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
-    deleteButton.className = 'blocklist-card-action';
-    deleteButton.title = 'Delete blocklist';
-    deleteButton.textContent = '🗑️';
+    deleteButton.className = 'blocklist-card-btn blocklist-card-btn-danger';
+    deleteButton.title = t('btn-delete-blocklist');
+    deleteButton.textContent = '×';
     deleteButton.addEventListener('click', (event) => {
       event.stopPropagation();
-      if (!window.confirm(`Delete blocklist "${blocklist.name}"?`)) {
-        return;
-      }
       if (window.app && typeof window.app.sendAction === 'function') {
         window.app.sendAction('deleteBlocklist', { blocklistId: blocklist.id });
       }
@@ -852,103 +900,6 @@ function renderBlocklist(blocklist) {
   description.className = 'blocklist-description';
   description.textContent = blocklist.description || '';
   container.appendChild(description);
-
-  if (blocklist.updateFromUrl !== null && blocklist.updateFromUrl !== '') {
-    const sourceRow = document.createElement('div');
-    sourceRow.className = 'blocklist-source-row';
-
-    const title = document.createElement('div');
-    title.className = 'blocklist-source-label';
-    title.textContent = 'Update From:';
-    sourceRow.appendChild(title);
-
-    const url = document.createElement('div');
-    url.className = 'blocklist-source-url';
-    url.textContent = blocklist.updateFromUrl;
-    sourceRow.appendChild(url);
-
-    container.appendChild(sourceRow);
-
-    const updatePeriodRow = document.createElement('div');
-    updatePeriodRow.className = 'blocklist-source-row';
-
-    const updatePeriodLabel = document.createElement('div');
-    updatePeriodLabel.className = 'blocklist-source-label';
-    updatePeriodLabel.textContent = 'Update:';
-    updatePeriodRow.appendChild(updatePeriodLabel);
-
-    const updatePeriodValue = document.createElement('div');
-    updatePeriodValue.className = 'blocklist-update-row';
-    updatePeriodValue.textContent = formatUpdatePeriodForDisplay(blocklist.updatePeriodMinutes);
-    updatePeriodRow.appendChild(updatePeriodValue);
-
-    container.appendChild(updatePeriodRow);
-
-    const lastUpdateSeconds = Number(blocklist.lastUpdate ?? 0);
-    const lastSuccessfulSeconds = Number(blocklist.lastSuccessfulUpdate ?? 0);
-    const hasLastUpdate = Number.isFinite(lastUpdateSeconds) && lastUpdateSeconds > 0;
-    const hasLastSuccessful = Number.isFinite(lastSuccessfulSeconds) && lastSuccessfulSeconds > 0;
-    const lastUpdateText = hasLastUpdate ? formatLocalTime(lastUpdateSeconds) : '';
-    const lastSuccessfulText = hasLastSuccessful ? formatLocalTime(lastSuccessfulSeconds) : '';
-    const lastUpdateError = blocklist.lastUpdateError;
-    const updateMetaRow = document.createElement('div');
-    updateMetaRow.className = 'blocklist-update-meta-row';
-
-    const updateStatus = document.createElement('div');
-    updateStatus.className = 'blocklist-update-row';
-    if (lastUpdateError !== null && lastUpdateError !== undefined && lastUpdateError !== '') {
-      updateStatus.classList.add('blocklist-update-row-error');
-      updateStatus.textContent = `Last update failed ${lastUpdateText ? `(${lastUpdateText})` : ''}: ${lastUpdateError}`;
-    } else if (hasLastUpdate) {
-      updateStatus.textContent = `Last update: ${lastUpdateText}`;
-    } else {
-      updateStatus.textContent = 'Last update: never';
-    }
-    updateMetaRow.appendChild(updateStatus);
-
-    const enabledLabel = document.createElement('label');
-    enabledLabel.className = 'edit-dialog-checkbox-label';
-    enabledLabel.title = 'enabled';
-    const enabledInput = document.createElement('input');
-    enabledInput.type = 'checkbox';
-    enabledInput.className = 'blocklist-entry-checkbox';
-    enabledInput.checked = blocklist.disabled !== true;
-    enabledInput.disabled = blocklist.id < 0;
-    enabledInput.addEventListener('click', (event) => {
-      event.stopPropagation();
-    });
-    enabledInput.addEventListener('change', (event) => {
-      event.stopPropagation();
-      if (blocklist.id < 0) {
-        return;
-      }
-      blocklist.disabled = !enabledInput.checked;
-      const knownBlocklist = blocklistsById.get(blocklist.id);
-      if (knownBlocklist) {
-        knownBlocklist.disabled = blocklist.disabled;
-      }
-      if (window.app && typeof window.app.sendAction === 'function') {
-        window.app.sendAction('setBlocklistEnabled', {
-          blocklistId: blocklist.id,
-          enabled: enabledInput.checked,
-        });
-      }
-    });
-    enabledLabel.appendChild(enabledInput);
-    enabledLabel.appendChild(document.createTextNode(' enabled'));
-    updateMetaRow.appendChild(enabledLabel);
-    container.appendChild(updateMetaRow);
-
-    if (
-      (lastUpdateError !== null && lastUpdateError !== undefined && lastUpdateError !== '')
-      && hasLastSuccessful
-    ) {
-      const successRow = document.createElement('div');
-      successRow.className = 'blocklist-update-row';
-      successRow.textContent = `Last successful update: ${lastSuccessfulText}`;
-      container.appendChild(successRow);
-    }
-  }
 
   container.addEventListener('click', () => {
     const previousSelection = getSelectedBlocklistId();
@@ -1029,6 +980,10 @@ function setDetailsEmptyState(container, text) {
 function renderEntryRow(entry, index) {
   const row = document.createElement('div');
   row.className = 'blocklist-entry-row';
+  const parentBlocklist = blocklistsById.get(getSelectedBlocklistId());
+  if (entry.isDisabled || parentBlocklist?.disabled === true) {
+    row.classList.add('is-disabled');
+  }
 
   if (
     highlightedEntry
@@ -1042,6 +997,7 @@ function renderEntryRow(entry, index) {
   checkbox.type = 'checkbox';
   checkbox.className = 'blocklist-entry-checkbox';
   checkbox.checked = !entry.isDisabled;
+  checkbox.title = entry.isDisabled ? t('disabled') : t('enabled');
   checkbox.addEventListener('click', (event) => {
     event.stopPropagation();
   });
@@ -1054,54 +1010,34 @@ function renderEntryRow(entry, index) {
       return;
     }
     const entryType = entry.entryType;
-    window.app.sendAction('toggleBlocklistEntryEnabled', { entryType, value });
+    window.app.sendAction('setBlocklistEntryDisabled', { entryType, value, isDisabled: !entry.isDisabled });
   });
   row.appendChild(checkbox);
 
   const title = document.createElement('div');
   title.className = 'blocklist-entry-title';
-  title.textContent = formatEntryTitle(entry);
+
+  const valueSpan = document.createElement('span');
+  valueSpan.className = 'blocklist-entry-value';
+  valueSpan.textContent = formatEntryTitle(entry);
+  title.appendChild(valueSpan);
+
+  if (Array.isArray(entry.blocklists) && entry.blocklists.length > 0) {
+    appendBlocklistNamesInfo(title, entry.blocklists.map(id => blocklistsById.get(id)?.name).filter(Boolean));
+  }
+
   row.appendChild(title);
 
   if (isUserBlocklistSelected()) {
     const key = entrySelectionKey(entry.entryType, entry.value);
-    if (selectedUserEntries.has(key)) {
+    if (userEntrySelection.has(key)) {
       row.classList.add('is-selected');
     }
     row.addEventListener('click', (event) => {
-      const details = ensureBlocklistDetails(getSelectedBlocklistId());
-
-      if (event.shiftKey && userSelectionAnchorIndex !== null) {
-        const start = Math.min(userSelectionAnchorIndex, index);
-        const end = Math.max(userSelectionAnchorIndex, index);
-        selectedUserEntries.clear();
-        for (let i = start; i <= end; i += 1) {
-          const rangeEntry = details.entries.get(i);
-          if (!rangeEntry || !rangeEntry.value) {
-            continue;
-          }
-          const rangeKey = entrySelectionKey(rangeEntry.entryType, rangeEntry.value);
-          selectedUserEntries.set(rangeKey, {
-            entryType: rangeEntry.entryType,
-            value: rangeEntry.value,
-          });
-        }
-        userSelectionAnchorIndex = index;
-      } else if (event.metaKey || event.ctrlKey) {
-        if (selectedUserEntries.has(key)) {
-          selectedUserEntries.delete(key);
-        } else {
-          selectedUserEntries.set(key, { entryType: entry.entryType, value: entry.value });
-        }
-        userSelectionAnchorIndex = index;
-      } else {
-        selectedUserEntries.clear();
-        selectedUserEntries.set(key, { entryType: entry.entryType, value: entry.value });
-        userSelectionAnchorIndex = index;
+      if (activeVirtualList) {
+        activeVirtualList.listEl.focus({ preventScroll: true });
       }
-
-      refreshVirtualList();
-      setupBlocklistDetailsHeaderAddButton();
+      userEntrySelection.handleClick(event, index, key);
     });
   }
 
@@ -1118,7 +1054,7 @@ function renderPlaceholderRow() {
 
   const label = document.createElement('div');
   label.className = 'blocklist-entry-title';
-  label.textContent = 'Loading…';
+  label.textContent = t('loading');
   row.appendChild(label);
 
   return row;
@@ -1208,7 +1144,8 @@ function renderVirtualListRows(ctx) {
     return;
   }
 
-  const scrollTop = ctx.listEl.scrollTop;
+  const headerHeight = ctx.headerEl ? ctx.headerEl.offsetHeight : 0;
+  const scrollTop = Math.max(0, ctx.listEl.scrollTop - headerHeight);
   const visibleRows = Math.max(1, Math.ceil(ctx.listEl.clientHeight / VIRTUAL_ROW_HEIGHT));
 
   const startIndex = Math.max(0, Math.floor(scrollTop / VIRTUAL_ROW_HEIGHT) - VIRTUAL_OVERSCAN);
@@ -1238,6 +1175,58 @@ function refreshVirtualList() {
   }
 }
 
+function renderBlocklistPropertiesCard(blocklist) {
+  const card = document.createElement('div');
+  card.className = 'inspector-card blocklist-properties-card';
+
+  const headline = document.createElement('div');
+  headline.className = 'inspector-headline';
+  headline.textContent = blocklist.name || '';
+  card.appendChild(headline);
+
+  if (blocklist.description && blocklist.description.trim().length > 0) {
+    const descBox = document.createElement('div');
+    descBox.className = 'inspector-box';
+    setHighlightedText(descBox, blocklist.description);
+    card.appendChild(descBox);
+  }
+
+  const hasUrl = blocklist.updateFromUrl !== null && blocklist.updateFromUrl !== '';
+
+  if (hasUrl) {
+    const grid = document.createElement('div');
+    grid.className = 'inspector-grid';
+
+    appendInspectorRow(grid, t('field-update'),
+      formatUpdatePeriodForDisplay(blocklist.updatePeriodMinutes), { plain: true });
+
+    const lastUpdateSec = Number(blocklist.lastUpdate ?? 0);
+    const lastSuccessfulSec = Number(blocklist.lastSuccessfulUpdate ?? 0);
+    const hasLastUpdate = Number.isFinite(lastUpdateSec) && lastUpdateSec > 0;
+    const hasLastSuccessful = Number.isFinite(lastSuccessfulSec) && lastSuccessfulSec > 0;
+    const lastUpdateError = blocklist.lastUpdateError;
+    const hasError = lastUpdateError !== null && lastUpdateError !== undefined && lastUpdateError !== '';
+
+    if (hasError) {
+      const failedValue = (hasLastUpdate ? formatLocalTime(lastUpdateSec) + ': ' : '') + lastUpdateError;
+      appendInspectorRow(grid, t('field-update-failed'), failedValue,
+        { plain: true, rowClass: 'blocklist-update-row-error' });
+      appendInspectorRow(grid, t('field-last-success'),
+        hasLastSuccessful ? formatLocalTime(lastSuccessfulSec) : t('never'), { plain: true });
+    } else {
+      appendInspectorRow(grid, t('field-last-update'),
+        hasLastUpdate ? formatLocalTime(lastUpdateSec) : t('never'), { plain: true });
+    }
+
+    appendInspectorRow(grid, t('field-url'), blocklist.updateFromUrl,
+      { plain: true, valueClass: 'blocklist-inspector-url' });
+
+    card.appendChild(grid);
+  }
+
+  return card;
+}
+
 function renderBlocklistDetails() {
   const detailsContainer = getBlocklistsDetailsContainer();
   if (!detailsContainer) {
@@ -1251,7 +1240,15 @@ function renderBlocklistDetails() {
   if (activeDetailsBlocklistId === selectedId && activeVirtualList) {
     const count = detailsContainer.querySelector('.blocklist-detail-count');
     if (count) {
-      count.textContent = `${(details.totalEntries || 0).toLocaleString()} entries`;
+      count.textContent = t('entry-count', { n: (details.totalEntries || 0).toLocaleString() });
+    }
+    const headerEl = activeVirtualList.headerEl;
+    if (headerEl) {
+      const bl = blocklistsById.get(selectedId);
+      const oldCard = headerEl.querySelector('.blocklist-properties-card');
+      if (bl && oldCard) {
+        oldCard.replaceWith(renderBlocklistPropertiesCard(bl));
+      }
     }
     refreshVirtualList();
     return;
@@ -1262,12 +1259,25 @@ function renderBlocklistDetails() {
   const wrapper = document.createElement('div');
   wrapper.className = 'blocklist-details';
 
+  const listEl = document.createElement('div');
+  listEl.className = 'blocklist-entry-list';
+
+  // Header: properties card + headline row — lives inside the scroll container
+  // so it scrolls together with the entries.
+  const headerEl = document.createElement('div');
+  headerEl.className = 'blocklist-details-header';
+
+  const blocklist = blocklistsById.get(selectedId);
+  if (blocklist) {
+    headerEl.appendChild(renderBlocklistPropertiesCard(blocklist));
+  }
+
   const headlineRow = document.createElement('div');
   headlineRow.className = 'blocklist-detail-headline-row';
 
   const headline = document.createElement('div');
   headline.className = 'blocklist-detail-headline';
-  headline.textContent = 'Blocked entries';
+  headline.textContent = t('blocked-entries');
   headlineRow.appendChild(headline);
 
   const count = document.createElement('div');
@@ -1276,10 +1286,8 @@ function renderBlocklistDetails() {
   headlineRow.appendChild(count);
   setupBlocklistDetailsHeaderAddButton();
 
-  wrapper.appendChild(headlineRow);
-
-  const listEl = document.createElement('div');
-  listEl.className = 'blocklist-entry-list';
+  headerEl.appendChild(headlineRow);
+  listEl.appendChild(headerEl);
 
   if ((details.totalEntries || 0) === 0) {
     const empty = document.createElement('div');
@@ -1304,6 +1312,7 @@ function renderBlocklistDetails() {
   activeVirtualList = {
     blocklistId: selectedId,
     listEl,
+    headerEl,
     topSpacer,
     rowsContainer,
     bottomSpacer,
@@ -1313,6 +1322,22 @@ function renderBlocklistDetails() {
     renderVirtualListRows(activeVirtualList);
   });
 
+  if (isUserBlocklistSelected()) {
+    listEl.tabIndex = 0;
+    listEl.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+        return;
+      }
+      const delta = event.key === 'ArrowDown' ? 1 : -1;
+      const nextIndex = userEntrySelection.navigate(delta, { extend: event.shiftKey });
+      if (nextIndex !== false) {
+        centerVirtualListOnIndex(activeVirtualList, nextIndex);
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    });
+  }
+
   wrapper.appendChild(listEl);
 
   detailsContainer.innerHTML = '';
@@ -1321,11 +1346,12 @@ function renderBlocklistDetails() {
   renderVirtualListRows(activeVirtualList);
 }
 
-function handleSetBlocklists(msg) {
-  setupBlocklistHeaderAddButton();
-  setupBlocklistDetailsHeaderAddButton();
+function applySetBlocklists(msg) {
+  blocklistUpdateTimer = null;
 
   const blocklists = msg.blocklists;
+  const incomingIds = new Set(blocklists.map((b) => b.id));
+
   blocklistsById.clear();
   for (const blocklist of blocklists) {
     blocklistsById.set(blocklist.id, blocklist);
@@ -1335,20 +1361,94 @@ function handleSetBlocklists(msg) {
   table.classList.add('blocklists-list');
   table.innerHTML = '';
 
+  const COMBINED_LIST_ID = -100;
+  const combined = blocklists.find((b) => b.id === COMBINED_LIST_ID);
+  const rest = blocklists.filter((b) => b.id !== COMBINED_LIST_ID);
+
   const selected = getSelectedBlocklistId();
-  if (!blocklists.some((b) => b.id === selected)) {
+  if (previousBlocklistIds !== null) {
+    const newIds = rest.filter((b) => !previousBlocklistIds.has(b.id)).map((b) => b.id);
+    if (newIds.length > 0) {
+      setSelectedBlocklistId(newIds[0]);
+    } else if (!blocklists.some((b) => b.id === selected)) {
+      setSelectedBlocklistId(getUserBlocklistId());
+    }
+  } else if (!blocklists.some((b) => b.id === selected)) {
     setSelectedBlocklistId(getUserBlocklistId());
   }
 
-  for (const blocklist of blocklists) {
+  if (combined) {
+    const combinedCard = renderBlocklist(combined);
+    combinedCard.classList.add('is-combined');
+    table.appendChild(combinedCard);
+    const separator = document.createElement('div');
+    separator.className = 'blocklist-section-separator';
+    table.appendChild(separator);
+  }
+  for (const blocklist of rest) {
     table.appendChild(renderBlocklist(blocklist));
   }
+
+  // Animate cards that are new since the previous render.
+  if (previousBlocklistIds !== null) {
+    for (const card of table.querySelectorAll('.blocklist-card')) {
+      const id = Number(card.dataset.blocklistId);
+      if (!previousBlocklistIds.has(id)) {
+        card.classList.add('is-card-added');
+        card.addEventListener('animationend', () => {
+          card.classList.remove('is-card-added');
+        }, { once: true });
+      }
+    }
+  }
+  previousBlocklistIds = incomingIds;
+
+  const selectedCard = table.querySelector('.blocklist-card.is-selected');
+  if (selectedCard) {
+    selectedCard.scrollIntoView({ block: 'nearest' });
+  }
+
   if (window.app && typeof window.app.sendAction === 'function') {
     window.app.sendAction('selectBlocklist', { id: getSelectedBlocklistId() });
   }
 
   renderBlocklistDetails();
   tryCompletePendingLocate();
+}
+
+function handleSetBlocklists(msg) {
+  setupBlocklistHeaderAddButton();
+  setupBlocklistDetailsHeaderAddButton();
+
+  // Cancel any pending removal animation from a previous update.
+  if (blocklistUpdateTimer !== null) {
+    clearTimeout(blocklistUpdateTimer);
+    blocklistUpdateTimer = null;
+  }
+
+  // If we have a previous render, flash cards that are being removed.
+  if (previousBlocklistIds !== null) {
+    const incomingIds = new Set(msg.blocklists.map((b) => b.id));
+    const table = document.getElementById('blocklists');
+    let hasFlash = false;
+    if (table) {
+      for (const card of table.querySelectorAll('.blocklist-card')) {
+        const id = Number(card.dataset.blocklistId);
+        if (previousBlocklistIds.has(id) && !incomingIds.has(id)) {
+          card.classList.add('is-card-removing');
+          hasFlash = true;
+        }
+      }
+    }
+    if (hasFlash) {
+      blocklistUpdateTimer = setTimeout(() => {
+        applySetBlocklists(msg);
+      }, 250);
+      return;
+    }
+  }
+
+  applySetBlocklists(msg);
 }
 
 function handleSetBlocklistDetails(msg) {
@@ -1388,6 +1488,32 @@ function handleSetBlocklistEntries(msg) {
   }
 
   clearPendingForRange(details, start, start + entries.length - 1);
+
+  if (blocklistId === getUserBlocklistId() && pendingAddedEntryValues !== null) {
+    let firstMatchIndex = null;
+    const updatedSelection = userEntrySelection.getAll();
+    for (let i = 0; i < entries.length; i += 1) {
+      const entry = entries[i];
+      if (entry.value && pendingAddedEntryValues.has(entry.value)) {
+        const key = entrySelectionKey(entry.entryType, entry.value);
+        updatedSelection.add(key);
+        if (firstMatchIndex === null) {
+          firstMatchIndex = start + i;
+        }
+        pendingAddedEntryValues.delete(entry.value);
+      }
+    }
+    if (firstMatchIndex !== null) {
+      userEntrySelection.setSelected(updatedSelection, firstMatchIndex);
+    }
+    if (pendingAddedEntryValues.size === 0) {
+      pendingAddedEntryValues = null;
+    }
+    if (firstMatchIndex !== null && pendingScrollToAdded && blocklistId === getSelectedBlocklistId()) {
+      pendingScrollToAdded = false;
+      centerVirtualListOnIndex(activeVirtualList, firstMatchIndex);
+    }
+  }
 
   if (blocklistId === getSelectedBlocklistId()) {
     refreshVirtualList();

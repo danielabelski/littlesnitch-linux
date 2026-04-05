@@ -3,9 +3,15 @@
 
 let rulesCurrentList = [];
 let rulesDisplayedList = [];
-let selectedRuleIds = new Set();
-let ruleSelectionAnchorIndex = null;
+const ruleSelection = createMultiSelection({
+  getCount: () => rulesDisplayedList.length,
+  getItemByIndex: (i) => rulesDisplayedList[i],
+  getId: (rule) => rule.id,
+  onChanged: refreshRuleSelectionStyles,
+});
 let rulesSortCriteria = [{ key: 'process', order: 'asc' }];
+let rulesLastColumnSort = 'port';
+let rulesOriginalOrder = new Map();
 let rulesSearchQuery = '';
 let pendingRevealRuleId = null;
 let ruleDialog = null;
@@ -34,37 +40,48 @@ function ruleFileName(path) {
 }
 
 function ruleDirectionArrow(direction) {
+  let suffix;
   switch (direction) {
-    case 1:
-      return '→';
-    case 2:
-      return '←';
-    case 3:
-      return '↔';
-    default:
-      return '→';
+    case 1: suffix = 'outgoing'; break;
+    case 2: suffix = 'incoming'; break;
+    case 3: suffix = 'bidirectional'; break;
+    default: suffix = 'outgoing';
   }
+  return `<svg width="20" height="20" fill="currentColor"><use href="#rule-${suffix}"/></svg>`;
 }
 
 function ruleDirectionLabel(direction) {
   switch (direction) {
     case 1:
-      return 'out';
+      return t('direction-out');
     case 2:
-      return 'in';
+      return t('direction-in');
     case 3:
-      return 'both';
+      return t('direction-both');
     default:
-      return 'out';
+      return t('direction-out');
+  }
+}
+
+function ruleDirectionLabelLong(direction) {
+  switch (direction) {
+    case 1:
+      return t('direction-outbound');
+    case 2:
+      return t('direction-inbound');
+    case 3:
+      return t('direction-both-ways');
+    default:
+      return t('direction-outbound');
   }
 }
 
 function rulePriorityLabel(priority) {
   const names = {
-    0: 'Low',
-    1: 'Regular',
-    2: 'High',
-    3: 'Extra High',
+    0: t('priority-low'),
+    1: t('priority-regular'),
+    2: t('priority-high'),
+    3: t('priority-extra-high'),
   };
   const value = Number(priority);
   if (Number.isFinite(value) && Object.prototype.hasOwnProperty.call(names, value)) {
@@ -78,7 +95,12 @@ function normalizedRuleAction(action) {
 }
 
 function ruleActionLabel(action) {
-  return normalizedRuleAction(action) === 'allow' ? 'Allow' : 'Deny';
+  return normalizedRuleAction(action) === 'allow' ? t('action-allow') : t('action-deny');
+}
+
+function ruleActionSVG(action) {
+  const suffix = normalizedRuleAction(action) === 'allow' ? 'allow' : 'deny';
+  return `<svg width="14" height="14"><use href="#rule-${suffix}" /></svg>`;
 }
 
 function ruleActionEmoji(action) {
@@ -95,27 +117,27 @@ function ruleProcessLabel(rule) {
     return primary;
   }
   if (via) {
-    return `Any Process via ${via}`;
+    return t('any-process-via', { via });
   }
-  return 'Any Process';
+  return t('any-process');
 }
 
 function ruleRemotePatternLabel(remotePattern) {
   if (!remotePattern || !remotePattern.type) {
-    return 'Any Server';
+    return t('any-server');
   }
   switch (remotePattern.type) {
     case 'any':
-      return 'Any Server';
+      return t('any-server');
     case 'localNet':
-      return 'Local Network';
+      return t('remote-local-network');
     case 'domains':
       return `domain ${remotePattern.value || ''}`.trim();
     case 'hosts':
     case 'ipAddresses':
       return remotePattern.value || '';
     default:
-      return 'Any Server';
+      return t('any-server');
   }
 }
 
@@ -185,9 +207,26 @@ function ruleSortValue(rule, sortKey) {
       return (ruleRemotePatternLabel(rule.remotePattern) || '').toLowerCase();
     case 'port':
       return (ruleProtocolPortLabel(rule.protocol, rule.port) || '').toLowerCase();
+    case 'modificationDate': return rule.modificationDate || 0;
+    case 'creationDate':     return rule.creationDate || 0;
+    case 'precedence':       return rulesOriginalOrder.get(rule.id) ?? 0;
+    case 'priority':         return rule.priority || 0;
     default:
       return '';
   }
+}
+
+function shortDateTime(epochSeconds) {
+  if (!epochSeconds || epochSeconds <= 0) return '';
+  const age = Date.now() / 1000 - epochSeconds;
+  const d = new Date(epochSeconds * 1000);
+  const prefs = getDtPrefs();
+  return age < 86400 ? _fmtTime(d, prefs, false) : _fmtDate(d, prefs);
+}
+
+function fixedSortOrderForKey(key) {
+  if (key === 'modificationDate' || key === 'creationDate' || key === 'priority') return 'desc';
+  return 'asc';
 }
 
 function compareRulesForSort(a, b) {
@@ -245,7 +284,7 @@ function setHighlightedText(element, text) {
   const rawText = text || '';
   const query = normalizedRulesSearchQuery();
   if (!query || query.length === 0) {
-    element.textContent = rawText;
+    element.innerHTML = rawText;
     return;
   }
 
@@ -253,7 +292,7 @@ function setHighlightedText(element, text) {
   let searchStart = 0;
   let matchIndex = haystack.indexOf(query, searchStart);
   if (matchIndex < 0) {
-    element.textContent = rawText;
+    element.innerHTML = rawText;
     return;
   }
 
@@ -264,7 +303,7 @@ function setHighlightedText(element, text) {
     }
     const mark = document.createElement('mark');
     mark.className = 'rules-search-highlight';
-    mark.textContent = rawText.slice(matchIndex, matchIndex + query.length);
+    mark.innerHTML = rawText.slice(matchIndex, matchIndex + query.length);
     fragment.appendChild(mark);
     searchStart = matchIndex + query.length;
     matchIndex = haystack.indexOf(query, searchStart);
@@ -299,8 +338,7 @@ function selectRuleInRulesSection(ruleId) {
   if (typeof ruleId !== 'number') {
     return;
   }
-  selectedRuleIds = new Set([ruleId]);
-  ruleSelectionAnchorIndex = null;
+  ruleSelection.setSelected([ruleId]);
   pendingRevealRuleId = ruleId;
   if (rulesCurrentList.some((rule) => rule.id === ruleId)) {
     applyRulesData(rulesCurrentList);
@@ -311,7 +349,6 @@ window.selectRuleInRulesSection = selectRuleInRulesSection;
 
 function setRulesSearchQuery(query) {
   rulesSearchQuery = typeof query === 'string' ? query : '';
-  ruleSelectionAnchorIndex = null;
   applyRulesData(rulesCurrentList);
 }
 
@@ -336,56 +373,55 @@ function toggleRulesSort(sortKey) {
   if (rulesSortCriteria.length === 0) {
     rulesSortCriteria = [{ key: 'process', order: 'asc' }];
   }
-  ruleSelectionAnchorIndex = null;
   applyRulesData(rulesCurrentList);
 }
 
 function ruleProtocolInspectorLabel(protocolMask) {
   if (protocolMask === 31) {
-    return 'any protocol';
+    return t('any-protocol');
   }
   const protocols = ruleProtocolsFromMask(protocolMask);
-  return protocols.length > 0 ? protocols.join(', ') : 'any protocol';
+  return protocols.length > 0 ? protocols.join(', ') : t('any-protocol');
 }
 
 function rulePortInspectorLabel(portString) {
   if (!portString || portString === '0-65535') {
-    return 'any port';
+    return t('any-port');
   }
   return portString;
 }
 
 function ruleRemoteInspectorLabel(remotePattern) {
   if (!remotePattern || !remotePattern.type || remotePattern.type === 'any') {
-    return 'Any server';
+    return t('any-server');
   }
   if (remotePattern.type === 'localNet') {
-    return 'Local Network';
+    return t('remote-local-network');
   }
   const raw = (remotePattern.value || '').trim();
   const parts = raw.length === 0
     ? []
     : raw.split(',').map((part) => part.trim()).filter((part) => part.length > 0);
   if (remotePattern.type === 'hosts') {
-    return `${parts.length <= 1 ? 'Host' : 'Hosts'} ${parts.join(', ')}`.trim();
+    return `${parts.length <= 1 ? t('remote-host') : t('remote-hosts')} ${parts.join(', ')}`.trim();
   }
   if (remotePattern.type === 'domains') {
-    return `${parts.length <= 1 ? 'Domain' : 'Domains'} ${parts.join(', ')}`.trim();
+    return `${parts.length <= 1 ? t('remote-domain-singular') : t('remote-domains')} ${parts.join(', ')}`.trim();
   }
   if (remotePattern.type === 'ipAddresses') {
-    return `${parts.length <= 1 ? 'Address' : 'Addresses'} ${parts.join(', ')}`.trim();
+    return `${parts.length <= 1 ? t('remote-address') : t('remote-addresses')} ${parts.join(', ')}`.trim();
   }
-  return 'Any server';
+  return t('any-server');
 }
 
-function ruleHeadlineLabel(rule) {
-  const action = `${ruleActionEmoji(rule.action)} ${ruleActionLabel(rule.action)}`;
+function ruleHeadline(rule) {
+  const action = `${ruleActionSVG(rule.action)} <span>${ruleActionLabel(rule.action)}</span>`;
   const executable = rule.primaryExecutable
     ? (rule.viaExecutable ? `${rule.primaryExecutable} via ${rule.viaExecutable}` : rule.primaryExecutable)
-    : (rule.viaExecutable ? `Any Process via ${rule.viaExecutable}` : 'Any Process');
+    : (rule.viaExecutable ? t('any-process-via', { via: rule.viaExecutable }) : t('any-process'));
   const direction = ruleDirectionArrow(rule.direction);
   const remote = ruleRemoteInspectorLabel(rule.remotePattern);
-  return `${action} ${executable} ${direction} ${remote}`;
+  return `${action} <span>${executable}</span> ${direction} <span>${remote}</span>`;
 }
 
 function ruleLifetimeLabel(lifetime) {
@@ -395,31 +431,39 @@ function ruleLifetimeLabel(lifetime) {
   if (lifetime && typeof lifetime === 'object') {
     const until = lifetime.until ?? lifetime.Until;
     if (typeof until === 'number') {
-      return `Until ${new Date(until * 1000).toLocaleString()}`;
+      return t('lifetime-until', { datetime: formatDateTime(until) });
     }
   }
-  return 'Forever';
+  return t('lifetime-forever');
 }
 
 function ruleTimeLabel(epochSeconds) {
   if (!epochSeconds || epochSeconds <= 0) {
     return '-';
   }
-  return new Date(epochSeconds * 1000).toLocaleString();
+  return formatDateTime(epochSeconds);
 }
 
-function appendInspectorRow(grid, key, value) {
+function appendInspectorRow(grid, key, value, opts = {}) {
   const row = document.createElement('div');
-  row.className = 'rule-inspector-row';
+  row.className = 'inspector-row';
+  if (opts.rowClass) row.classList.add(opts.rowClass);
 
   const keyEl = document.createElement('div');
-  keyEl.className = 'rule-inspector-key';
+  keyEl.className = 'inspector-key';
   keyEl.textContent = key;
   row.appendChild(keyEl);
 
   const valueEl = document.createElement('div');
-  valueEl.className = 'rule-inspector-value';
-  setHighlightedText(valueEl, value && value.length > 0 ? value : '-');
+  valueEl.className = 'inspector-value';
+  if (opts.valueClass) valueEl.classList.add(opts.valueClass);
+  if (opts.html) {
+    valueEl.innerHTML = value;
+  } else if (opts.plain) {
+    valueEl.textContent = value && value.length > 0 ? value : '-';
+  } else {
+    setHighlightedText(valueEl, value && value.length > 0 ? value : '-');
+  }
   row.appendChild(valueEl);
 
   grid.appendChild(row);
@@ -427,15 +471,15 @@ function appendInspectorRow(grid, key, value) {
 
 function appendInspectorBox(container, headline, content) {
   const block = document.createElement('div');
-  block.className = 'rule-inspector-box-block';
+  block.className = 'inspector-box-block';
 
   const head = document.createElement('div');
-  head.className = 'rule-inspector-box-headline';
+  head.className = 'inspector-box-headline';
   head.textContent = headline;
   block.appendChild(head);
 
   const body = document.createElement('div');
-  body.className = 'rule-inspector-box';
+  body.className = 'inspector-box';
   setHighlightedText(body, content && content.length > 0 ? content : '-');
   block.appendChild(body);
 
@@ -457,40 +501,40 @@ function saveRuleNotes(rule, value) {
 
 function renderRuleInspectorCard(rule) {
   const card = document.createElement('div');
-  card.className = 'rule-inspector-card';
+  card.className = 'inspector-card';
 
   const title = document.createElement('div');
-  title.className = 'rule-inspector-headline';
-  setHighlightedText(title, ruleHeadlineLabel(rule));
+  title.className = 'inspector-headline';
+  title.innerHTML = ruleHeadline(rule);
   card.appendChild(title);
 
   const grid = document.createElement('div');
-  grid.className = 'rule-inspector-grid';
-  appendInspectorRow(grid, 'Action', `${ruleActionEmoji(rule.action)} ${ruleActionLabel(rule.action)}`);
+  grid.className = 'inspector-grid';
+  appendInspectorRow(grid, t('inspector-action'), `${ruleActionLabel(rule.action)}${rule.isDisabled ? t('rule-disabled-suffix') : ''}`);
   const executable = rule.primaryExecutable
     ? (rule.viaExecutable ? `${rule.primaryExecutable} via ${rule.viaExecutable}` : rule.primaryExecutable)
-    : (rule.viaExecutable ? `Any Process via ${rule.viaExecutable}` : 'Any Process');
-  appendInspectorRow(grid, 'Priority', rulePriorityLabel(rule.priority));
-  appendInspectorRow(grid, 'Executable', executable);
-  appendInspectorRow(grid, 'Direction', `${ruleDirectionArrow(rule.direction)} ${ruleDirectionLabel(rule.direction)}`);
-  appendInspectorRow(grid, 'Remote', ruleRemoteInspectorLabel(rule.remotePattern));
-  appendInspectorRow(grid, 'Protocol', ruleProtocolInspectorLabel(rule.protocol));
-  appendInspectorRow(grid, 'Port', rulePortInspectorLabel(rule.port));
-  appendInspectorRow(grid, 'Lifetime', ruleLifetimeLabel(rule.lifetime));
-  appendInspectorRow(grid, 'Created', ruleTimeLabel(rule.creationDate));
-  appendInspectorRow(grid, 'Modified', ruleTimeLabel(rule.modificationDate));
+    : (rule.viaExecutable ? t('any-process-via', { via: rule.viaExecutable }) : t('any-process'));
+  appendInspectorRow(grid, t('inspector-priority'), rulePriorityLabel(rule.priority));
+  appendInspectorRow(grid, t('inspector-executable'), executable);
+  appendInspectorRow(grid, t('inspector-direction'), ruleDirectionLabelLong(rule.direction));
+  appendInspectorRow(grid, t('inspector-remote'), ruleRemoteInspectorLabel(rule.remotePattern));
+  appendInspectorRow(grid, t('inspector-protocol'), ruleProtocolInspectorLabel(rule.protocol));
+  appendInspectorRow(grid, t('inspector-port'), rulePortInspectorLabel(rule.port));
+  appendInspectorRow(grid, t('inspector-lifetime'), ruleLifetimeLabel(rule.lifetime));
+  appendInspectorRow(grid, t('inspector-created'), ruleTimeLabel(rule.creationDate));
+  appendInspectorRow(grid, t('inspector-modified'), ruleTimeLabel(rule.modificationDate));
   card.appendChild(grid);
 
   const notesBlock = document.createElement('div');
-  notesBlock.className = 'rule-inspector-box-block';
+  notesBlock.className = 'inspector-box-block';
   const notesHeadline = document.createElement('div');
-  notesHeadline.className = 'rule-inspector-box-headline';
-  notesHeadline.textContent = 'Notes';
+  notesHeadline.className = 'inspector-box-headline';
+  notesHeadline.textContent = t('notes-headline');
   notesBlock.appendChild(notesHeadline);
   const notesBox = document.createElement('div');
-  notesBox.className = 'rule-inspector-box';
+  notesBox.className = 'inspector-box';
   const notesInput = document.createElement('textarea');
-  notesInput.className = 'rule-inspector-notes-input';
+  notesInput.className = 'inspector-notes-input';
   notesInput.rows = 3;
   notesInput.value = rule.notes || '';
   notesInput.classList.toggle(
@@ -501,8 +545,8 @@ function renderRuleInspectorCard(rule) {
   notesBox.appendChild(notesInput);
   const notesSave = document.createElement('button');
   notesSave.type = 'button';
-  notesSave.className = 'edit-dialog-button is-primary rule-inspector-save-button';
-  notesSave.textContent = 'Save Notes';
+  notesSave.className = 'edit-dialog-button is-primary inspector-save-button';
+  notesSave.textContent = t('btn-save-notes');
   notesSave.addEventListener('click', () => {
     saveRuleNotes(rule, notesInput.value);
   });
@@ -520,18 +564,18 @@ function renderRulesInspector() {
   details.innerHTML = '';
 
   const selectedRules = rulesCurrentList.filter(
-    (rule) => selectedRuleIds.has(rule.id) && ruleMatchesSearch(rule),
+    (rule) => ruleSelection.has(rule.id) && ruleMatchesSearch(rule),
   );
   if (selectedRules.length === 0) {
     const hint = document.createElement('div');
     hint.className = 'empty-state';
-    hint.textContent = 'Select one or more rules to inspect.';
+    hint.textContent = t('rules-inspect-hint');
     details.appendChild(hint);
     return;
   }
 
   const container = document.createElement('div');
-  container.className = 'rules-inspector';
+  container.className = 'inspector-list';
   for (const rule of selectedRules) {
     container.appendChild(renderRuleInspectorCard(rule));
   }
@@ -552,12 +596,12 @@ function updateRuleRemoteValueVisibility() {
   const remotePatternType = Number.parseInt(ruleDialogRemoteType.value, 10);
   const hideRemoteValue = remotePatternType === 1 || remotePatternType === 2;
   const headline = remotePatternType === 3
-    ? 'Remote Hosts'
+    ? t('dlg-remote-hosts')
     : remotePatternType === 4
-      ? 'Remote Domains'
+      ? t('dlg-remote-domains')
       : remotePatternType === 5
-        ? 'Remote Addresses'
-        : 'Remote Value';
+        ? t('dlg-remote-addresses')
+        : t('dlg-remote-value-label');
   const labelTextNode = ruleDialogRemoteValueLabel.querySelector('span');
   if (labelTextNode) {
     labelTextNode.textContent = headline;
@@ -587,7 +631,7 @@ function ruleModalPayloadFromInputs() {
 
   const priority = Number.parseInt(ruleDialogPriority.value, 10);
   if (!Number.isFinite(priority) || priority < 0 || priority > 255) {
-    setRuleDialogError('Priority must be between 0 and 255.');
+    setRuleDialogError(t('err-priority-range'));
     return null;
   }
 
@@ -595,7 +639,7 @@ function ruleModalPayloadFromInputs() {
   const protocol = Number.parseInt(ruleDialogProtocol.value, 10);
   const remotePatternType = Number.parseInt(ruleDialogRemoteType.value, 10);
   if (!Number.isFinite(direction) || !Number.isFinite(protocol) || !Number.isFinite(remotePatternType)) {
-    setRuleDialogError('Direction, protocol and remote type are required.');
+    setRuleDialogError(t('err-direction-required'));
     return null;
   }
 
@@ -676,7 +720,7 @@ function ensureRuleDialog() {
 
   const title = document.createElement('h2');
   title.className = 'edit-dialog-title';
-  title.textContent = 'Add Rule';
+  title.textContent = t('dlg-add-rule-title');
   form.appendChild(title);
 
   const hiddenId = document.createElement('input');
@@ -686,7 +730,7 @@ function ensureRuleDialog() {
 
   const primaryLabel = document.createElement('label');
   primaryLabel.className = 'edit-dialog-label';
-  primaryLabel.textContent = 'Primary executable (optional)';
+  primaryLabel.textContent = t('dlg-primary-exe-label');
   const primaryInput = document.createElement('input');
   primaryInput.className = 'edit-dialog-input';
   primaryInput.type = 'text';
@@ -695,7 +739,7 @@ function ensureRuleDialog() {
 
   const viaLabel = document.createElement('label');
   viaLabel.className = 'edit-dialog-label';
-  viaLabel.textContent = 'Via executable (optional)';
+  viaLabel.textContent = t('dlg-via-exe-label');
   const viaInput = document.createElement('input');
   viaInput.className = 'edit-dialog-input';
   viaInput.type = 'text';
@@ -707,34 +751,34 @@ function ensureRuleDialog() {
 
   const actionLabel = document.createElement('label');
   actionLabel.className = 'edit-dialog-label rule-modal-half';
-  actionLabel.textContent = 'Action';
+  actionLabel.textContent = t('dlg-action-label');
   const actionSelect = document.createElement('select');
   actionSelect.className = 'edit-dialog-input';
-  actionSelect.innerHTML = '<option value="allow">Allow</option><option value="deny">Deny</option>';
+  actionSelect.innerHTML = `<option value="allow">${t('action-allow')}</option><option value="deny">${t('action-deny')}</option>`;
   actionLabel.appendChild(actionSelect);
   actionDirectionRow.appendChild(actionLabel);
 
   const directionLabel = document.createElement('label');
   directionLabel.className = 'edit-dialog-label rule-modal-half';
-  directionLabel.textContent = 'Direction';
+  directionLabel.textContent = t('dlg-direction-label');
   const directionSelect = document.createElement('select');
   directionSelect.className = 'edit-dialog-input';
-  directionSelect.innerHTML = '<option value="1">Out</option><option value="2">In</option><option value="3">Both</option>';
+  directionSelect.innerHTML = `<option value="1">${t('dir-out')}</option><option value="2">${t('dir-in')}</option><option value="3">${t('dir-both')}</option>`;
   directionLabel.appendChild(directionSelect);
   actionDirectionRow.appendChild(directionLabel);
   form.appendChild(actionDirectionRow);
 
   const remoteTypeLabel = document.createElement('label');
   remoteTypeLabel.className = 'edit-dialog-label';
-  remoteTypeLabel.textContent = 'Remote type';
+  remoteTypeLabel.textContent = t('dlg-remote-type-label');
   const remoteTypeSelect = document.createElement('select');
   remoteTypeSelect.className = 'edit-dialog-input';
   remoteTypeSelect.innerHTML = [
-    '<option value="1">Any server</option>',
-    '<option value="2">Local network</option>',
-    '<option value="3">Hosts</option>',
-    '<option value="4">Domains</option>',
-    '<option value="5">IP addresses</option>',
+    `<option value="1">${t('any-server')}</option>`,
+    `<option value="2">${t('remote-local-network')}</option>`,
+    `<option value="3">${t('remote-hosts')}</option>`,
+    `<option value="4">${t('remote-domains')}</option>`,
+    `<option value="5">${t('remote-ip-addresses')}</option>`,
   ].join('');
   remoteTypeLabel.appendChild(remoteTypeSelect);
   form.appendChild(remoteTypeLabel);
@@ -742,7 +786,7 @@ function ensureRuleDialog() {
   const remoteValueLabel = document.createElement('label');
   remoteValueLabel.className = 'edit-dialog-label rule-modal-collapsible';
   const remoteValueTitle = document.createElement('span');
-  remoteValueTitle.textContent = 'Remote Value';
+  remoteValueTitle.textContent = t('dlg-remote-value-label');
   remoteValueLabel.appendChild(remoteValueTitle);
   const remoteValueInput = document.createElement('input');
   remoteValueInput.className = 'edit-dialog-input';
@@ -758,11 +802,11 @@ function ensureRuleDialog() {
 
   const protocolLabel = document.createElement('label');
   protocolLabel.className = 'edit-dialog-label rule-modal-half';
-  protocolLabel.textContent = 'Protocol';
+  protocolLabel.textContent = t('dlg-protocol-label');
   const protocolSelect = document.createElement('select');
   protocolSelect.className = 'edit-dialog-input';
   protocolSelect.innerHTML = [
-    '<option value="31">Any</option>',
+    `<option value="31">${t('proto-any-option')}</option>`,
     '<option value="2">TCP</option>',
     '<option value="4">UDP</option>',
     '<option value="1">ICMP</option>',
@@ -774,11 +818,11 @@ function ensureRuleDialog() {
 
   const portLabel = document.createElement('label');
   portLabel.className = 'edit-dialog-label rule-modal-half';
-  portLabel.textContent = 'Ports (e.g. 22, 443, 8000-9000)';
+  portLabel.textContent = t('dlg-ports-label');
   const portInput = document.createElement('input');
   portInput.className = 'edit-dialog-input';
   portInput.type = 'text';
-  portInput.placeholder = 'Any';
+  portInput.placeholder = t('dlg-port-placeholder');
   portLabel.appendChild(portInput);
   protocolPortRow.appendChild(portLabel);
   form.appendChild(protocolPortRow);
@@ -788,7 +832,7 @@ function ensureRuleDialog() {
 
   const priorityLabel = document.createElement('label');
   priorityLabel.className = 'edit-dialog-label rule-modal-half';
-  priorityLabel.textContent = 'Priority';
+  priorityLabel.textContent = t('dlg-priority-label');
   const priorityInput = document.createElement('input');
   priorityInput.className = 'edit-dialog-input';
   priorityInput.type = 'number';
@@ -802,13 +846,13 @@ function ensureRuleDialog() {
   const enabledInput = document.createElement('input');
   enabledInput.type = 'checkbox';
   enabledLabel.appendChild(enabledInput);
-  enabledLabel.appendChild(document.createTextNode(' Rule is enabled'));
+  enabledLabel.appendChild(document.createTextNode(t('dlg-rule-is-enabled')));
   priorityEnabledRow.appendChild(enabledLabel);
   form.appendChild(priorityEnabledRow);
 
   const notesLabel = document.createElement('label');
   notesLabel.className = 'edit-dialog-label';
-  notesLabel.textContent = 'Notes';
+  notesLabel.textContent = t('dlg-notes-label');
   const notesInput = document.createElement('textarea');
   notesInput.className = 'edit-dialog-textarea';
   notesInput.rows = 3;
@@ -825,14 +869,14 @@ function ensureRuleDialog() {
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
   cancelButton.className = 'edit-dialog-button';
-  cancelButton.textContent = 'Cancel';
+  cancelButton.textContent = t('btn-cancel');
   cancelButton.addEventListener('click', () => dialog.close());
   actions.appendChild(cancelButton);
 
   const saveButton = document.createElement('button');
   saveButton.type = 'submit';
   saveButton.className = 'edit-dialog-button is-primary';
-  saveButton.textContent = 'Save';
+  saveButton.textContent = t('btn-save');
   actions.appendChild(saveButton);
 
   form.appendChild(actions);
@@ -872,7 +916,7 @@ function openRuleModal(rule) {
   }
 
   if (rule) {
-    ruleDialogTitle.textContent = 'Edit Rule';
+    ruleDialogTitle.textContent = t('dlg-edit-rule-title');
     ruleDialogId.value = String(rule.id);
     ruleDialogPrimary.value = rule.primaryExecutable || '';
     ruleDialogVia.value = rule.viaExecutable || '';
@@ -886,7 +930,7 @@ function openRuleModal(rule) {
     ruleDialogEnabled.checked = !rule.isDisabled;
     ruleDialogNotes.value = rule.notes || '';
   } else {
-    ruleDialogTitle.textContent = 'Add Rule';
+    ruleDialogTitle.textContent = t('dlg-add-rule-title');
     ruleDialogId.value = '';
     ruleDialogPrimary.value = '';
     ruleDialogVia.value = '';
@@ -908,36 +952,24 @@ function openRuleModal(rule) {
   }
 }
 
-function setupRulesHeaderButtons() {
-  const title = document.querySelector('.section[data-section="rules"] .left-pane .pane-title');
-  if (!title) {
-    return;
-  }
 
-  if (!title.querySelector('[data-role="add-rule"]')) {
-    title.classList.add('blocklist-pane-title');
 
-    const label = document.createElement('span');
-    label.textContent = title.textContent || 'Rule List';
-    title.textContent = '';
-    title.appendChild(label);
+function getLastColumnSortOptions() {
+  return [
+    { key: 'port',             label: t('sort-port-protocol') },
+    { key: 'modificationDate', label: t('sort-modified') },
+    { key: 'creationDate',     label: t('sort-created') },
+    { key: 'precedence',       label: t('sort-precedence') },
+    { key: 'priority',         label: t('sort-priority') },
+  ];
+}
 
-    const actions = document.createElement('div');
-    actions.className = 'blocklist-pane-actions';
-    title.appendChild(actions);
-
-    const addButton = document.createElement('button');
-    addButton.type = 'button';
-    addButton.className = 'blocklist-add-button';
-    addButton.setAttribute('data-role', 'add-rule');
-    addButton.setAttribute('aria-label', 'Add rule');
-    addButton.title = 'Add rule';
-    addButton.textContent = '+';
-    addButton.addEventListener('click', () => {
-      openRuleModal(null);
-    });
-    actions.appendChild(addButton);
-  }
+function showRulesSortPopup(anchorEl) {
+  window.app.showSortPopup(anchorEl, getLastColumnSortOptions(), rulesLastColumnSort, (key) => {
+    rulesLastColumnSort = key;
+    rulesSortCriteria = [{ key, order: fixedSortOrderForKey(key) }];
+    applyRulesData(rulesCurrentList);
+  });
 }
 
 function renderRuleTable(ruleList) {
@@ -947,16 +979,37 @@ function renderRuleTable(ruleList) {
   const header = document.createElement('tr');
   const columns = [
     { title: '', sortKey: 'enabled' },
-    { title: 'Action', sortKey: 'action' },
-    { title: 'Process', sortKey: 'process' },
-    { title: 'Dir', sortKey: 'direction' },
-    { title: 'Server', sortKey: 'remote' },
-    { title: 'Port', sortKey: 'port' },
-    { title: '', sortKey: null },
+    { title: t('col-action'), sortKey: 'action' },
+    { title: t('col-process'), sortKey: 'process' },
+    { title: t('col-dir'), sortKey: 'direction' },
+    { title: t('col-server'), sortKey: 'remote' },
+    { title: t('col-port'), sortKey: 'port', sortPopup: true },
+    { title: '', sortKey: null, addButton: true },
   ];
   for (const column of columns) {
     const th = document.createElement('th');
-    if (column.sortKey) {
+    if (column.sortPopup) {
+      th.classList.add('rules-sortable-header');
+      const primary = rulesSortCriteria && rulesSortCriteria.length > 0
+        ? rulesSortCriteria[0]
+        : { key: 'process', order: 'asc' };
+      const activeOption = getLastColumnSortOptions().find((o) => o.key === rulesLastColumnSort);
+      const titleText = (rulesLastColumnSort === 'port' || !activeOption)
+        ? column.title
+        : activeOption.label;
+      const title = document.createElement('span');
+      title.textContent = titleText;
+      th.appendChild(title);
+      if (primary.key === rulesLastColumnSort) {
+        const indicator = document.createElement('span');
+        indicator.className = 'rules-sort-indicator';
+        indicator.textContent = fixedSortOrderForKey(rulesLastColumnSort) === 'desc' ? '▼' : '▲';
+        th.appendChild(indicator);
+      }
+      th.addEventListener('click', () => {
+        showRulesSortPopup(th);
+      });
+    } else if (column.sortKey) {
       th.classList.add('rules-sortable-header');
       const title = document.createElement('span');
       title.textContent = column.title;
@@ -973,6 +1026,45 @@ function renderRuleTable(ruleList) {
       th.addEventListener('click', () => {
         toggleRulesSort(column.sortKey);
       });
+    } else if (column.addButton) {
+      const btnGroup = document.createElement('div');
+      btnGroup.className = 'rule-th-actions';
+
+      const addBtn = document.createElement('button');
+      addBtn.type = 'button';
+      addBtn.className = 'blocklist-add-button';
+      addBtn.setAttribute('aria-label', t('btn-add-rule'));
+      addBtn.title = t('btn-add-rule');
+      addBtn.innerHTML = '<svg width="14" height="14" fill="currentColor"><use href="#btn-add"/></svg>';
+      addBtn.addEventListener('click', () => {
+        openRuleModal(null);
+      });
+      btnGroup.appendChild(addBtn);
+
+      const deleteSelectedBtn = document.createElement('button');
+      deleteSelectedBtn.type = 'button';
+      deleteSelectedBtn.className = 'blocklist-add-button';
+      deleteSelectedBtn.setAttribute('data-role', 'delete-selected-rules');
+      deleteSelectedBtn.setAttribute('aria-label', t('btn-delete-rules'));
+      deleteSelectedBtn.title = t('btn-delete-rules');
+      deleteSelectedBtn.innerHTML = '<svg width="18" height="18" fill="currentColor"><use href="#btn-remove"/></svg>';
+      deleteSelectedBtn.disabled = ruleSelection.size === 0;
+      deleteSelectedBtn.addEventListener('click', () => {
+        if (ruleSelection.size === 0) {
+          return;
+        }
+        const hasFactory = rulesCurrentList.some((r) => ruleSelection.has(r.id) && r.id < 0);
+        if (hasFactory) {
+          alert(t('alert-factory-rule'));
+          return;
+        }
+        if (window.app && typeof window.app.sendAction === 'function') {
+          window.app.sendAction('deleteRules', { ruleIds: Array.from(ruleSelection.getAll()) });
+        }
+      });
+      btnGroup.appendChild(deleteSelectedBtn);
+
+      th.appendChild(btnGroup);
     } else {
       th.textContent = column.title;
     }
@@ -987,20 +1079,22 @@ function renderRuleTable(ruleList) {
     const row = document.createElement('tr');
     row.dataset.ruleId = String(rule.id);
     row.dataset.ruleIndex = String(index);
-    if (selectedRuleIds.has(rule.id)) {
+    if (ruleSelection.has(rule.id)) {
       row.classList.add('is-selected');
     }
     const isHighPriority = (rule.priority || 0) > 1;
     if (isHighPriority) {
       row.classList.add('rule-high-priority');
     }
-
     const enabledCell = document.createElement('td');
+    enabledCell.setAttribute('data-role', 'rule-enabled');
+    const enabledInner = document.createElement('div');
+    enabledInner.className = 'rule-cell-inner';
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
     checkbox.className = 'rule-enable-checkbox';
     checkbox.checked = !rule.isDisabled;
-    checkbox.title = rule.isDisabled ? 'Disabled' : 'Enabled';
+    checkbox.title = rule.isDisabled ? t('disabled') : t('enabled');
     checkbox.addEventListener('click', (event) => {
       event.stopPropagation();
     });
@@ -1009,74 +1103,132 @@ function renderRuleTable(ruleList) {
       if (!window.app || typeof window.app.sendAction !== 'function') {
         return;
       }
-      window.app.sendAction('toggleRuleEnabled', { ruleId: rule.id });
+      if (rule.id < 0 && !rule.isDisabled) {
+        const confirmed = confirm(t('confirm-disable-factory-rule'));
+        if (!confirmed) {
+          checkbox.checked = true;
+          return;
+        }
+      }
+      window.app.sendAction('setRuleDisabled', { ruleId: rule.id, isDisabled: !rule.isDisabled });
     });
-    enabledCell.appendChild(checkbox);
+    enabledInner.appendChild(checkbox);
+    enabledCell.appendChild(enabledInner);
     row.appendChild(enabledCell);
 
     const actionCell = document.createElement('td');
-    const actionText = `${ruleActionEmoji(rule.action)} ${ruleActionLabel(rule.action)}`;
-    setHighlightedText(actionCell, actionText);
-    actionCell.title = actionText;
+    const actionInner = document.createElement('div');
+    actionInner.className = 'rule-cell-inner';
+    actionInner.innerHTML = `${ruleActionSVG(rule.action)} ${ruleActionLabel(rule.action)}`;
+    actionCell.title = ruleActionLabel(rule.action);
+    actionCell.appendChild(actionInner);
+    actionCell.setAttribute('data-role', 'rule-action');
     row.appendChild(actionCell);
 
     const processCell = document.createElement('td');
+    const processInner = document.createElement('div');
+    processInner.className = 'rule-cell-inner';
     const processText = ruleProcessLabel(rule);
-    setHighlightedText(processCell, processText);
+    setHighlightedText(processInner, processText);
     processCell.title = processText;
+    processCell.appendChild(processInner);
     row.appendChild(processCell);
 
     const directionCell = document.createElement('td');
-    const directionText = `${ruleDirectionArrow(rule.direction)} ${ruleDirectionLabel(rule.direction)}`;
-    setHighlightedText(directionCell, directionText);
-    directionCell.title = directionText;
+    const directionInner = document.createElement('div');
+    directionInner.className = 'rule-cell-inner';
+    setHighlightedText(directionInner, `${ruleDirectionArrow(rule.direction)} ${ruleDirectionLabel(rule.direction)}`);
+    directionCell.setAttribute('data-role', 'rule-direction');
+    directionCell.title = ruleDirectionLabel(rule.direction);
+    directionCell.appendChild(directionInner);
     row.appendChild(directionCell);
 
     const remoteCell = document.createElement('td');
+    const remoteInner = document.createElement('div');
+    remoteInner.className = 'rule-cell-inner';
     const remoteText = ruleRemotePatternLabel(rule.remotePattern);
-    setHighlightedText(remoteCell, remoteText);
+    setHighlightedText(remoteInner, remoteText);
     remoteCell.title = remoteText;
+    remoteCell.appendChild(remoteInner);
     row.appendChild(remoteCell);
 
     const protocolPortCell = document.createElement('td');
+    const protocolPortInner = document.createElement('div');
+    protocolPortInner.className = 'rule-cell-inner';
     const protocolPort = ruleProtocolPortLabel(rule.protocol, rule.port);
-    setHighlightedText(protocolPortCell, protocolPort.length > 0 ? protocolPort : '');
-    protocolPortCell.title = protocolPort;
+    if (rulesLastColumnSort === 'modificationDate') {
+      protocolPortInner.textContent = shortDateTime(rule.modificationDate);
+      protocolPortCell.title = formatDateTime(rule.modificationDate);
+    } else if (rulesLastColumnSort === 'creationDate') {
+      protocolPortInner.textContent = shortDateTime(rule.creationDate);
+      protocolPortCell.title = formatDateTime(rule.creationDate);
+    } else if (rulesLastColumnSort === 'precedence') {
+      protocolPortInner.textContent = String((rulesOriginalOrder.get(rule.id) ?? 0) + 1);
+    } else if (rulesLastColumnSort === 'priority') {
+      protocolPortInner.textContent = rulePriorityLabel(rule.priority);
+    } else {
+      setHighlightedText(protocolPortInner, protocolPort.length > 0 ? protocolPort : '');
+      protocolPortCell.title = protocolPort;
+    }
+    protocolPortCell.appendChild(protocolPortInner);
     row.appendChild(protocolPortCell);
 
     const actionsCell = document.createElement('td');
-    actionsCell.className = 'rule-row-actions';
+    const actionsInner = document.createElement('div');
+    actionsInner.className = 'rule-cell-inner';
+    const actionsWrapper = document.createElement('div');
+    actionsWrapper.className = 'rule-row-actions';
 
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
     editBtn.className = 'rule-row-btn';
-    editBtn.title = 'Edit rule';
-    editBtn.textContent = '✎';
+    editBtn.title = t('btn-edit-rule');
+    editBtn.innerHTML = '<svg width="14" height="14" fill="currentColor"><use href="#rule-edit"/></svg>';
     editBtn.addEventListener('click', (event) => {
       event.stopPropagation();
+      if (rule.id < 0) {
+        alert(t('alert-factory-rule'));
+        return;
+      }
       openRuleModal(rule);
     });
-    actionsCell.appendChild(editBtn);
+    actionsWrapper.appendChild(editBtn);
 
     const deleteBtn = document.createElement('button');
     deleteBtn.type = 'button';
     deleteBtn.className = 'rule-row-btn rule-row-btn-danger';
-    deleteBtn.title = 'Delete rule';
-    deleteBtn.textContent = '×';
+    deleteBtn.title = t('btn-delete-rule');
+    deleteBtn.innerHTML = '<svg width="14" height="14" fill="currentColor"><use href="#rule-delete"/></svg>';
     deleteBtn.addEventListener('click', (event) => {
       event.stopPropagation();
+      if (rule.id < 0) {
+        alert(t('alert-factory-rule'));
+        return;
+      }
       if (window.app && typeof window.app.sendAction === 'function') {
         window.app.sendAction('deleteRules', { ruleIds: [rule.id] });
       }
     });
-    actionsCell.appendChild(deleteBtn);
+    actionsWrapper.appendChild(deleteBtn);
+    actionsInner.appendChild(actionsWrapper);
+    actionsCell.appendChild(actionsInner);
 
     row.appendChild(actionsCell);
 
+    if (rule.isDisabled) {
+      for (const cell of row.cells) {
+        cell.classList.add('is-disabled');
+      }
+    }
+
     row.addEventListener('click', (event) => {
-      updateRuleSelection(event, index, rule.id);
+      ruleSelection.handleClick(event, index, rule.id);
     });
     row.addEventListener('dblclick', () => {
+      if (rule.id < 0) {
+        alert(t('alert-factory-rule'));
+        return;
+      }
       openRuleModal(rule);
     });
 
@@ -1094,138 +1246,80 @@ function refreshRuleSelectionStyles() {
   const rows = container.querySelectorAll('tbody tr[data-rule-id]');
   for (const row of rows) {
     const id = Number.parseInt(row.dataset.ruleId || '', 10);
-    if (selectedRuleIds.has(id)) {
+    if (ruleSelection.has(id)) {
       row.classList.add('is-selected');
     } else {
       row.classList.remove('is-selected');
     }
   }
-  setupRulesHeaderButtons();
   renderRulesInspector();
-}
-
-function updateRuleSelection(event, index, ruleId) {
-  if (event.shiftKey && ruleSelectionAnchorIndex !== null) {
-    const start = Math.min(ruleSelectionAnchorIndex, index);
-    const end = Math.max(ruleSelectionAnchorIndex, index);
-    if (!event.ctrlKey && !event.metaKey) {
-      selectedRuleIds.clear();
-    }
-    for (let i = start; i <= end; i += 1) {
-      selectedRuleIds.add(rulesDisplayedList[i].id);
-    }
-  } else if (event.ctrlKey || event.metaKey) {
-    if (selectedRuleIds.has(ruleId)) {
-      selectedRuleIds.delete(ruleId);
-    } else {
-      selectedRuleIds.add(ruleId);
-    }
-    ruleSelectionAnchorIndex = index;
-  } else {
-    selectedRuleIds.clear();
-    selectedRuleIds.add(ruleId);
-    ruleSelectionAnchorIndex = index;
+  const deleteSelectedBtn = container.querySelector('[data-role="delete-selected-rules"]');
+  if (deleteSelectedBtn) {
+    deleteSelectedBtn.disabled = ruleSelection.size === 0;
   }
-  refreshRuleSelectionStyles();
-}
-
-function selectedRuleIndices() {
-  const indices = [];
-  for (let i = 0; i < rulesDisplayedList.length; i += 1) {
-    if (selectedRuleIds.has(rulesDisplayedList[i].id)) {
-      indices.push(i);
-    }
-  }
-  return indices;
 }
 
 function navigateRulesSelection(delta, options = {}) {
-  if (delta !== 1 && delta !== -1) {
+  const nextIndex = ruleSelection.navigate(delta, options);
+  if (nextIndex === false) {
     return false;
   }
-  if (rulesDisplayedList.length === 0) {
-    return false;
-  }
-
-  const extend = options.extend === true;
-  const selectedIndices = selectedRuleIndices();
-  let currentIndex = ruleSelectionAnchorIndex;
-  if (currentIndex === null || currentIndex < 0 || currentIndex >= rulesDisplayedList.length) {
-    if (selectedIndices.length > 0) {
-      currentIndex = delta > 0 ? selectedIndices[selectedIndices.length - 1] : selectedIndices[0];
-    } else {
-      currentIndex = delta > 0 ? -1 : rulesDisplayedList.length;
-    }
-  }
-
-  const nextIndex = Math.max(0, Math.min(rulesDisplayedList.length - 1, currentIndex + delta));
   const nextRule = rulesDisplayedList[nextIndex];
-  if (!nextRule) {
-    return false;
+  if (nextRule) {
+    revealRuleInList(nextRule.id);
   }
-
-  if (extend) {
-    if (ruleSelectionAnchorIndex === null
-      || ruleSelectionAnchorIndex < 0
-      || ruleSelectionAnchorIndex >= rulesDisplayedList.length) {
-      ruleSelectionAnchorIndex = Math.max(0, Math.min(rulesDisplayedList.length - 1, currentIndex));
-    }
-    const start = Math.min(ruleSelectionAnchorIndex, nextIndex);
-    const end = Math.max(ruleSelectionAnchorIndex, nextIndex);
-    selectedRuleIds.clear();
-    for (let i = start; i <= end; i += 1) {
-      selectedRuleIds.add(rulesDisplayedList[i].id);
-    }
-  } else {
-    selectedRuleIds.clear();
-    selectedRuleIds.add(nextRule.id);
-    ruleSelectionAnchorIndex = nextIndex;
-  }
-
-  refreshRuleSelectionStyles();
-  revealRuleInList(nextRule.id);
   return true;
 }
 
 window.navigateRulesSelection = navigateRulesSelection;
 
-function applyRulesData(rules) {
+function applyRulesData(rules, animateRowIds) {
   const container = document.getElementById('rules-list');
   if (!container) {
     return;
   }
   const details = document.getElementById('rules-details');
-  setupRulesHeaderButtons();
 
   container.innerHTML = '';
   rulesCurrentList = rules;
+  rulesOriginalOrder = new Map(rules.map((r, i) => [r.id, i]));
   rulesDisplayedList = sortedRulesForDisplay(rulesCurrentList.filter(ruleMatchesSearch));
 
   const displayedIds = new Set(rulesDisplayedList.map((r) => r.id));
-  selectedRuleIds = new Set(Array.from(selectedRuleIds).filter((id) => displayedIds.has(id)));
-  if (ruleSelectionAnchorIndex !== null
-    && (ruleSelectionAnchorIndex < 0 || ruleSelectionAnchorIndex >= rulesDisplayedList.length)) {
-    ruleSelectionAnchorIndex = null;
-  }
+  const prunedIds = new Set([...ruleSelection.getAll()].filter((id) => displayedIds.has(id)));
+  ruleSelection.setSelected(prunedIds);
 
   if (rulesDisplayedList.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.textContent = normalizedRulesSearchQuery().length > 0 ? 'No matching rules' : 'No rules';
+    empty.textContent = normalizedRulesSearchQuery().length > 0 ? t('empty-no-matching-rules') : t('empty-no-rules');
     container.appendChild(empty);
   } else {
     container.appendChild(renderRuleTable(rulesDisplayedList));
   }
 
+  if (animateRowIds && animateRowIds.size > 0) {
+    const tbody = container.querySelector('tbody');
+    if (tbody) {
+      for (const row of tbody.rows) {
+        if (animateRowIds.has(Number(row.dataset.ruleId))) {
+          row.classList.add('is-row-added');
+          row.addEventListener('animationend', () => {
+            row.classList.remove('is-row-added');
+          }, { once: true });
+        }
+      }
+    }
+  }
+
   if (details) {
     renderRulesInspector();
   }
-  if (pendingRevealRuleId !== null && selectedRuleIds.has(pendingRevealRuleId)) {
+  if (pendingRevealRuleId !== null && ruleSelection.has(pendingRevealRuleId)) {
     if (revealRuleInList(pendingRevealRuleId)) {
       pendingRevealRuleId = null;
     }
   }
-  setupRulesHeaderButtons();
 }
 
 function handleSetRules(msg) {
@@ -1233,48 +1327,89 @@ function handleSetRules(msg) {
   applyRulesData(rules);
 }
 
+let rulesUpdateTimer = null;
+
+function applyUpdateRules(rulesRemoved, rulesAdded, addedIndexes, updatedIds) {
+  rulesUpdateTimer = null;
+
+  const removedSet = new Set(rulesRemoved);
+  const nextRules = rulesCurrentList.filter((rule) => !removedSet.has(rule.id));
+
+  const addedRuleIds = new Set();
+  const purelyAddedIds = new Set(); // excludes rules that are updated (removed + re-added same ID)
+  for (let i = 0; i < rulesAdded.length; i++) {
+    const id = rulesAdded[i].id;
+    addedRuleIds.add(id);
+    if (!updatedIds.has(id)) {
+      purelyAddedIds.add(id);
+    }
+    nextRules.splice(addedIndexes[i], 0, rulesAdded[i]);
+  }
+
+  if (addedRuleIds.size > 0) {
+    ruleSelection.setSelected(addedRuleIds);
+  }
+
+  applyRulesData(nextRules, purelyAddedIds.size > 0 ? purelyAddedIds : undefined);
+
+  if (addedRuleIds.size > 0) {
+    refreshRuleSelectionStyles();
+    const firstAddedId = rulesAdded[0].id;
+    requestAnimationFrame(() => {
+      const container = document.getElementById('rules-list');
+      const row = container && container.querySelector(`tbody tr[data-rule-id="${firstAddedId}"]`);
+      if (!row) {
+        return;
+      }
+      const animatedEl = row.querySelector('.rule-cell-inner');
+      if (animatedEl && row.classList.contains('is-row-added')) {
+        animatedEl.addEventListener('animationend', () => revealRuleInList(firstAddedId), { once: true });
+      } else {
+        revealRuleInList(firstAddedId);
+      }
+    });
+  }
+}
+
 function handleUpdateRules(msg) {
   const rulesRemoved = Array.isArray(msg.rulesRemoved) ? msg.rulesRemoved : [];
   const rulesAdded = Array.isArray(msg.rulesAdded) ? msg.rulesAdded : [];
+  const addedIndexes = Array.isArray(msg.addedIndexes) ? msg.addedIndexes : [];
   if (rulesRemoved.length === 0 && rulesAdded.length === 0) {
     return;
   }
 
-  const removedSet = new Set(rulesRemoved);
-  const addedById = new Map();
-  const addedOrder = [];
-  for (const rule of rulesAdded) {
-    if (!rule || typeof rule.id !== 'number') {
-      continue;
-    }
-    if (!addedById.has(rule.id)) {
-      addedOrder.push(rule.id);
-    }
-    addedById.set(rule.id, rule);
+  // IDs that appear in both rulesRemoved and rulesAdded are updates (not pure inserts/removals).
+  const addedIdSet = new Set(rulesAdded.map((r) => r.id));
+  const updatedIds = new Set(rulesRemoved.filter((id) => addedIdSet.has(id)));
+
+  // Cancel any pending removal animation from a previous update.
+  if (rulesUpdateTimer !== null) {
+    clearTimeout(rulesUpdateTimer);
+    rulesUpdateTimer = null;
   }
 
-  const nextRules = [];
-  for (const rule of rulesCurrentList) {
-    if (!rule || typeof rule.id !== 'number') {
-      continue;
+  // Animate removal only for rows being purely removed (not updated).
+  const purelyRemovedIds = new Set(rulesRemoved.filter((id) => !updatedIds.has(id)));
+  if (purelyRemovedIds.size > 0) {
+    const container = document.getElementById('rules-list');
+    const tbody = container && container.querySelector('tbody');
+    let hasFlash = false;
+    if (tbody) {
+      for (const row of tbody.rows) {
+        if (purelyRemovedIds.has(Number(row.dataset.ruleId))) {
+          row.classList.add('is-row-removing');
+          hasFlash = true;
+        }
+      }
     }
-    if (addedById.has(rule.id)) {
-      nextRules.push(addedById.get(rule.id));
-      addedById.delete(rule.id);
-      continue;
-    }
-    if (removedSet.has(rule.id)) {
-      continue;
-    }
-    nextRules.push(rule);
-  }
-
-  for (const id of addedOrder) {
-    const rule = addedById.get(id);
-    if (rule) {
-      nextRules.push(rule);
+    if (hasFlash) {
+      rulesUpdateTimer = setTimeout(() => {
+        applyUpdateRules(rulesRemoved, rulesAdded, addedIndexes, updatedIds);
+      }, 250);
+      return;
     }
   }
 
-  applyRulesData(nextRules);
+  applyUpdateRules(rulesRemoved, rulesAdded, addedIndexes, updatedIds);
 }

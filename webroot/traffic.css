@@ -3,15 +3,14 @@
 
 .h-splitter {
   flex-shrink: 0;
-  height: 8px;
+  height: 4px;
   cursor: row-resize;
-  background: linear-gradient(180deg, var(--surface-muted) 0%, var(--line) 50%, var(--surface-muted) 100%);
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  background: var(--line);
 }
 
+.h-splitter:active,
 .h-splitter:hover {
-  background: linear-gradient(180deg, var(--row-selected-bg) 0%, var(--accent-soft) 50%, var(--row-selected-bg) 100%);
+  background: var(--line-hover);
 }
 
 .traffic-chart-wrap {
@@ -22,6 +21,11 @@
   border-radius: 12px;
   overflow: hidden;
   background: var(--surface);
+  border-top: none;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  padding-right: 16px;
+  padding-bottom: 16px;
 }
 
 .traffic-mode-selector {
@@ -56,28 +60,17 @@
   font: inherit;
   font-size: var(--font-micro);
   padding: 2px 6px;
-  border: 1px solid #4a90d9;
+  border: 1px solid var(--accent-border);
   border-radius: 4px;
-  background: #deeaf8;
-  color: #1a5a9a;
-}
-
-.traffic-filter-badge .traffic-filter-cancel,
-.time-filter-indicator .time-filter-cancel {
-  border: none;
-  background: none;
+  background: var(--accent-soft);
+  color: var(--accent);
   cursor: pointer;
-  padding: 0 1px;
-  font-size: var(--font-default);
-  line-height: 1;
-  color: #1a5a9a;
-  opacity: 0.7;
 }
 
-.traffic-filter-badge .traffic-filter-cancel:hover,
-.time-filter-indicator .time-filter-cancel:hover {
-  opacity: 1;
+.traffic-filter-badge:hover {
+  background: var(--accent-border);
 }
+
 
 /* Fixed-width legend value cells so the legend doesn't reflow while hovering. */
 .traffic-chart-wrap .u-series .u-value {
@@ -94,22 +87,18 @@
   width: 4.5em; /* wide enough for "999TB/s" */
 }
 
-/* Topbar replacement for the visible-period-filter select when a time filter is active. */
+/* Topbar replacement for the visible-period-filter select when a time filter is active.
+   Inherits layout/sizing/active colours from .filter-btn and .filter-btn.is-active. */
 .time-filter-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font: inherit;
-  font-size: var(--font-micro);
-  padding: 2px 4px;
-  border: 1px solid #4a90d9;
-  border-radius: 4px;
-  background: #deeaf8;
-  color: #1a5a9a;
-  box-sizing: border-box;
+  font: inherit;          /* buttons don't inherit font-family by default */
   vertical-align: middle;
 }
 
-/* Override uPlot's hardcoded crosshair color to respect dark mode */
+.time-filter-indicator:hover {
+  background: var(--accent-border); /* subtle darkening; is-active suppresses the default filter-btn:hover */
+}
+
+/* Override uPlot's hardcoded crosshair and selection colors to respect dark mode */
 .u-hz .u-cursor-x { border-right-color: var(--text-muted); }
 .u-hz .u-cursor-y { border-bottom-color: var(--text-muted); }
+.u-select { background: var(--chart-select-bg); }

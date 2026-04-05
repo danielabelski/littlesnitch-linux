@@ -43,41 +43,37 @@ function byteCountString(bytes) {
 function ageString(epochSeconds) {
   if (!epochSeconds || epochSeconds <= 0) return '';
   const age = Math.floor(Date.now() / 1000) - epochSeconds;
-  if (age < 10) return 'now';
-  if (age < 100) return `${Math.floor(age / 10) * 10} s ago`;
-  if (age < 5400) return `${Math.max(2, Math.floor(age / 60))} min ago`;
-  if (age < 172800) return `${Math.max(2, Math.floor(age / 3600))} hr ago`;
-  if (age < 5184000) return `${Math.max(3, Math.floor(age / 86400))} d ago`;
-  return `${Math.max(3, Math.floor(age / 2592000))} mo ago`;
+  if (age < 10) return t('age-now');
+  if (age < 100) return t('age-seconds', { n: Math.floor(age / 10) * 10 });
+  if (age < 5400) return t('age-minutes', { n: Math.max(2, Math.floor(age / 60)) });
+  if (age < 172800) return t('age-hours',   { n: Math.max(2, Math.floor(age / 3600)) });
+  if (age < 5184000) return t('age-days',   { n: Math.max(3, Math.floor(age / 86400)) });
+  return t('age-months', { n: Math.max(3, Math.floor(age / 2592000)) });
 }
 
 // Absolute event time, format depends on how long ago the event was:
 //   < 24 h  → HH:MM:SS
 //   < 7 d   → Weekday HH:MM  (e.g. "Tue 12:30")
-//   ≥ 7 d   → ISO date       (e.g. "2025-11-23")
+//   ≥ 7 d   → date only      (e.g. "2025-11-23")
+// Uses the same locale preferences as formatDateTime() (datetime.js).
 function absoluteTimeString(epochSeconds) {
   if (!epochSeconds || epochSeconds <= 0) return '';
   const age = Date.now() / 1000 - epochSeconds;
   const d = new Date(epochSeconds * 1000);
+  const prefs = getDtPrefs();
   if (age < 86400) {
-    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+    return _fmtTime(d, prefs, true);
   }
   if (age < 604800) {
     const day = d.toLocaleDateString(undefined, { weekday: 'short' });
-    const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', hour12: false });
-    return `${day} ${time}`;
+    return `${day} ${_fmtTime(d, prefs, false)}`;
   }
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  return `${y}-${m}-${String(d.getDate()).padStart(2, '0')}`;
+  return _fmtDate(d, prefs);
 }
 
-// Fixed "YYYY-MM-DD HH:MM:SS" in local time — used in the inspector panel.
+// Full date+time in local time — used in the inspector panel.
 function fullDateTimeString(epochSeconds) {
-  if (!epochSeconds || epochSeconds <= 0) return '';
-  const d = new Date(epochSeconds * 1000);
-  const p = n => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  return formatDateTime(epochSeconds);
 }
 
 
@@ -94,7 +90,7 @@ function createRow(row) {
   el.dataset.isLeaf = row.isLeaf ? 'true' : 'false';
   el.dataset.isMoreItems = row.isMoreItems ? 'true' : 'false';
   if (row.id === getSelectedConnectionRowId()) {
-    el.classList.add('selected');
+    el.classList.add('is-selected');
   }
 
   // Disclosure triangle
@@ -132,7 +128,32 @@ function createRow(row) {
   title.textContent = row.title;
   el.appendChild(title);
 
-  if (!row.isMoreItems) {
+  const ruleCol = document.createElement('span');
+  ruleCol.classList.add('rule-col');
+  el.appendChild(ruleCol);
+
+  if (row.isMoreItems) {
+    // Placeholder keeps alignment with the rule-button column in other rows
+    const placeholder = document.createElement('span');
+    placeholder.classList.add('rule-button-placeholder');
+    ruleCol.appendChild(placeholder);
+
+    // details-differ button (shown when sub-rows have differing verdicts)
+    const detailsButton = document.createElement('button');
+    detailsButton.classList.add('details-button');
+    detailsButton.onclick = function (event) {
+      event.stopPropagation();
+      window.app.sendAction('toggleDisclosure', { "id": row.id, "expandToDifferingDetail": true });
+    };
+    ruleCol.appendChild(detailsButton);
+
+    // Placeholders keep alignment with traffic/activity columns in other rows
+    for (const cls of ['total-bytes', 'last-event']) {
+      const span = document.createElement('span');
+      span.classList.add(cls);
+      el.appendChild(span);
+    }
+  } else {
     // Rule indication / button
     const ruleButton = document.createElement('button');
     ruleButton.classList.add('rule-button');
@@ -140,15 +161,16 @@ function createRow(row) {
       event.stopPropagation();
       window.app.sendAction('toggleRule', { "id": row.id });
     };
-    el.appendChild(ruleButton);
+    ruleCol.appendChild(ruleButton);
 
     // indication of different rule action in details
     const detailsButton = document.createElement('button');
     detailsButton.classList.add('details-button');
-    detailsButton.onclick = function () {
-      window.app.sendAction('toggleDisclosure', { "id": row.id });
+    detailsButton.onclick = function (event) {
+      event.stopPropagation();
+      window.app.sendAction('toggleDisclosure', { "id": row.id, "expandToDifferingDetail": true });
     };
-    el.appendChild(detailsButton);
+    ruleCol.appendChild(detailsButton);
 
     for (const cls of ['total-bytes', 'last-event']) {
       const span = document.createElement('span');
@@ -226,12 +248,14 @@ function formatProtoPort(protocolMask, portString) {
  * @returns {string}
  */
 function arrowFor(dir) {
+  let suffix;
   switch (dir) {
-    case 1: return '→';
-    case 2: return '←';
-    case 3: return '↔';
-    default: return '→';
+    case 1: suffix = 'outgoing'; break;
+    case 2: suffix = 'incoming'; break;
+    case 3: suffix = 'bidirectional'; break;
+    default: suffix = 'outgoing';
   }
+  return `<svg width="18" height="18" fill="currentColor"><use href="#rule-${suffix}"/></svg>`;
 }
 
 /**
@@ -240,7 +264,8 @@ function arrowFor(dir) {
  * @returns {string}
  */
 function emojiFor(action) {
-  return action.toLowerCase() === 'allow' ? '🟢' : '🔴';
+  const suffix = action.toLowerCase() === 'allow' ? 'allow' : 'deny';
+  return `<svg width="14" height="14"><use href="#rule-${suffix}"/></svg>`;
 }
 
 /* ---------------------  Rendering Code  --------------------- */
@@ -260,11 +285,16 @@ function renderRule(rule, withEnableButton) {
     checkbox.type = 'checkbox';
     checkbox.className = 'rule-enable-checkbox';
     checkbox.checked = !rule.isDisabled;
+    checkbox.title = rule.isDisabled ? t('disabled') : t('enabled');
     checkbox.addEventListener('click', (event) => {
       event.stopPropagation();
     });
     checkbox.addEventListener('change', e => {
-      window.app.sendAction('toggleRuleEnabled', { "ruleId": rule.id });
+      if (rule.id < 0 && !rule.isDisabled) {
+        const confirmed = confirm(t('confirm-disable-factory-rule'));
+        if (!confirmed) { checkbox.checked = true; return; }
+      }
+      window.app.sendAction('setRuleDisabled', { ruleId: rule.id, isDisabled: !rule.isDisabled });
     });
     container.appendChild(checkbox);
   }
@@ -272,7 +302,7 @@ function renderRule(rule, withEnableButton) {
   // --- 1. Emoji  ---
   const emoji = document.createElement('span');
   emoji.className = 'emoji';
-  emoji.textContent = emojiFor(rule.action);
+  emoji.innerHTML = emojiFor(rule.action);
   container.appendChild(emoji);
 
   // --- 2. Process name (bold) ---
@@ -285,14 +315,14 @@ function renderRule(rule, withEnableButton) {
   } else if (mainName) {
     proc.textContent = mainName;
   } else {
-    proc.textContent = "Any Process";
+    proc.textContent = t('any-process');
   }
   if (proc.textContent) container.appendChild(proc);
 
   // --- 3. Arrow ---
   const arrow = document.createElement('span');
   arrow.className = 'arrow';
-  arrow.textContent = arrowFor(rule.direction);
+  arrow.innerHTML = arrowFor(rule.direction);
   container.appendChild(arrow);
 
   // --- 4. Host / Domain ---
@@ -302,13 +332,13 @@ function renderRule(rule, withEnableButton) {
   if (remotePattern) {
     switch (remotePattern.type) {
       case 'any':
-        remote.textContent = 'Any';
+        remote.textContent = t('remote-any');
         break;
       case 'localNet':
-        remote.textContent = 'Local Network';
+        remote.textContent = t('remote-local-network');
         break;
       case 'domains':
-        remote.textContent = `domain ${remotePattern.value}`;
+        remote.textContent = t('remote-domain', { value: remotePattern.value });
         break;
       case 'hosts':
       case 'ipAddresses':
@@ -331,7 +361,7 @@ function renderRule(rule, withEnableButton) {
 
   if (typeof rule.id === 'number') {
     container.classList.add('rule-link');
-    container.title = 'Show in Rules';
+    container.title = t('show-in-rules');
     container.addEventListener('click', () => {
       const rulesTab = document.querySelector('.tab[data-section="rules"]');
       if (rulesTab instanceof HTMLButtonElement) {
@@ -349,6 +379,37 @@ function renderRule(rule, withEnableButton) {
 /* ---------------------  Rendering Code  --------------------- */
 
 /**
+ * Append .list-info elements describing the containing blocklists to `container`.
+ * `names` is an already-resolved array of blocklist name strings.
+ * Used by both connections.js (renderBlocklistEntry) and blocklists.js (renderEntryRow).
+ */
+function appendBlocklistNamesInfo(container, names) {
+  if (names.length === 1) {
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'list-info';
+    nameSpan.textContent = '(' + names[0] + ')';
+    container.appendChild(nameSpan);
+  } else if (names.length > 1) {
+    const ul = document.createElement('ul');
+    ul.className = 'blocklist-names';
+    names.forEach(name => {
+      const li = document.createElement('li');
+      li.textContent = name;
+      ul.appendChild(li);
+    });
+    const counterSpan = document.createElement('span');
+    counterSpan.className = 'list-info';
+    counterSpan.textContent = t('n-blocklists', { n: names.length });
+    counterSpan.title = names.join(', ');
+    counterSpan.addEventListener('click', () => {
+      ul.style.display = ul.style.display === 'none' ? 'block' : 'none';
+    });
+    container.appendChild(counterSpan);
+    container.appendChild(ul);
+  }
+}
+
+/**
  * Turn a single blocklist object into a <div class="block"> element.
  * @param {object} entry
  * @returns {HTMLElement}
@@ -363,13 +424,15 @@ function renderBlocklistEntry(entry, withEnableButton) {
     checkbox.type = 'checkbox';
     checkbox.className = 'rule-enable-checkbox';
     checkbox.checked = !entry.isDisabled;
+    checkbox.title = entry.isDisabled ? t('disabled') : t('enabled');
     checkbox.addEventListener('click', (event) => {
       event.stopPropagation();
     });
     checkbox.addEventListener('change', e => {
-      window.app.sendAction('toggleBlocklistEntryEnabled', {
-        "entryType": entry.entryType,
-        "value": entry.value
+      window.app.sendAction('setBlocklistEntryDisabled', {
+        entryType: entry.entryType,
+        value: entry.value,
+        isDisabled: !entry.isDisabled,
       });
     });
     container.appendChild(checkbox);
@@ -378,7 +441,7 @@ function renderBlocklistEntry(entry, withEnableButton) {
   // Emoji
   const emoji = document.createElement('span');
   emoji.className = 'emoji';
-  emoji.textContent = '⛔️';
+  emoji.innerHTML = '<svg width="12" height="12"><use href="#rule-blocklist"/></svg>';
   container.appendChild(emoji);
 
   // Value (host / domain / IP)
@@ -387,35 +450,7 @@ function renderBlocklistEntry(entry, withEnableButton) {
   valueSpan.textContent = entry.value;
   container.appendChild(valueSpan);
 
-  const names = entry.blocklists.map(entry => entry[1]);
-  if (names.length === 1) {
-    /* single blocklist – show the name immediately */
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'list-info';
-    nameSpan.textContent = '(' + names[0] + ')';
-    container.appendChild(nameSpan);
-  } else if (names.length > 1) {
-    /* multiple blocklists – show a clickable counter + tooltip */
-    const counterSpan = document.createElement('span');
-    counterSpan.className = 'list-info';
-    counterSpan.textContent = `(${names.length} blocklists)`;
-    counterSpan.title = names.join(', '); // tooltip with all names
-    counterSpan.addEventListener('click', () => {
-      const list = container.querySelector('.blocklist-names');
-      list.style.display = list.style.display === 'none' ? 'block' : 'none';
-    });
-    container.appendChild(counterSpan);
-
-    /* hidden list that can be toggled */
-    const ul = document.createElement('ul');
-    ul.className = 'blocklist-names';
-    names.forEach(name => {
-      const li = document.createElement('li');
-      li.textContent = name;
-      ul.appendChild(li);
-    });
-    container.appendChild(ul);
-  }
+  appendBlocklistNamesInfo(container, entry.blocklists.map(e => e[1]));
   /* If no blocklist entry (unlikely but for safety) we just leave the line as is. */
   if (entry && entry.entryType && entry.value) {
     const firstBlocklist = Array.isArray(entry.blocklists) && entry.blocklists.length > 0
@@ -423,7 +458,7 @@ function renderBlocklistEntry(entry, withEnableButton) {
       : null;
     const targetBlocklistId = Array.isArray(firstBlocklist) ? Number(firstBlocklist[0]) : null;
     container.classList.add('blocklist-entry-link');
-    container.title = 'Show in Blocklist';
+    container.title = t('show-in-blocklist');
     container.addEventListener('click', () => {
       if (typeof window.selectBlocklistEntryInBlocklist === 'function') {
         window.selectBlocklistEntryInBlocklist(
@@ -462,42 +497,42 @@ const PROTOCOL_MAP = {
 function addKeyValueLine(parent, label, value, opts = {}) {
   if (!value) return;                     // nothing to render
 
-  const line = document.createElement('div');
-  line.className = 'info-line';
+  const row = document.createElement('div');
+  row.className = 'inspector-row';
 
-  const field = document.createElement('span');
-  field.className = 'field';
-  field.textContent = label + ': ';
-  line.appendChild(field);
+  const keyEl = document.createElement('div');
+  keyEl.className = 'inspector-key';
+  keyEl.textContent = label;
+  row.appendChild(keyEl);
 
-  const val = document.createElement('span');
-  val.className = 'value';
+  const valueEl = document.createElement('div');
+  valueEl.className = 'inspector-value';
 
   if (opts.path) {
     const p = document.createElement('span');
     p.className = 'path';
     p.textContent = value;
-    val.appendChild(p);
+    valueEl.appendChild(p);
   } else if (opts.domain) {
-    val.textContent = value;
-    val.classList.add('domain-name');
+    valueEl.textContent = value;
+    valueEl.classList.add('domain-name');
   } else {
-    val.textContent = value;
+    valueEl.textContent = value;
   }
 
   if (opts.via) {
     const via = document.createElement('span');
     via.className = 'via';
     via.textContent = ' via ';
-    val.appendChild(via);
+    valueEl.appendChild(via);
     const viaPath = document.createElement('span');
     viaPath.className = 'path';
     viaPath.textContent = opts.viaValue;
-    val.appendChild(viaPath);
+    valueEl.appendChild(viaPath);
   }
 
-  line.appendChild(val);
-  parent.appendChild(line);
+  row.appendChild(valueEl);
+  parent.appendChild(row);
 }
 
 /* ---------- inspector statistics section ---------------------- */
@@ -517,10 +552,10 @@ function statisticsFromRowEl(rowEl) {
 function renderInspectorStatistics(statistics) {
   const container = document.createElement('div');
   container.className = 'inspector-statistics';
-  addKeyValueLine(container, 'Bytes received', byteCountString(statistics.bytesReceived));
-  addKeyValueLine(container, 'Bytes sent',     byteCountString(statistics.bytesSent));
-  addKeyValueLine(container, 'Last allowed',   fullDateTimeString(statistics.lastAllowed));
-  addKeyValueLine(container, 'Last denied',    fullDateTimeString(statistics.lastBlocked));
+  addKeyValueLine(container, t('stats-bytes-received'), byteCountString(statistics.bytesReceived));
+  addKeyValueLine(container, t('stats-bytes-sent'),     byteCountString(statistics.bytesSent));
+  addKeyValueLine(container, t('stats-last-allowed'),   fullDateTimeString(statistics.lastAllowed));
+  addKeyValueLine(container, t('stats-last-denied'),    fullDateTimeString(statistics.lastBlocked));
   return container;
 }
 
@@ -536,13 +571,7 @@ function renderRowInspector(data) {
   container.className = 'row-inspector';
 
   if (data.row === null) {
-    const line = document.createElement('div');
-    line.className = 'info-line';
-    const field = document.createElement('span');
-    field.className = 'field';
-    field.textContent = 'All Processes';
-    line.appendChild(field);
-    container.appendChild(line);
+    addKeyValueLine(container, t('field-process'), t('all-processes'));
     return container;
   }
 
@@ -550,30 +579,32 @@ function renderRowInspector(data) {
   if (data.primaryExecutable) {
     addKeyValueLine(
       container,
-      'Process',
+      t('field-process'),
       data.primaryExecutable,
       { path: true, via: !!data.viaExecutable, viaValue: data.viaExecutable }
     );
+  } else {
+    addKeyValueLine(container, t('field-process'), t('unknown-executable'));
   }
 
   /* Direction ------------------------------------------------- */
   if (typeof data.isInbound === 'boolean') {
-    addKeyValueLine(container, 'Direction', data.isInbound ? 'Inbound' : 'Outbound');
+    addKeyValueLine(container, t('field-direction'), data.isInbound ? t('direction-inbound') : t('direction-outbound'));
   }
 
   /* Remote ----------------------------------------------------- */
-  addKeyValueLine(container, 'Remote', data.remoteName?.value, { domain: data.remoteName?.type == 'domain' });
+  addKeyValueLine(container, t('field-remote'), data.remoteName?.value, { domain: data.remoteName?.type == 'domain' });
 
   /* IP address ----------------------------------------------- */
-  addKeyValueLine(container, 'Remote Address', data.ipAddress);
+  addKeyValueLine(container, t('field-remote-address'), data.ipAddress);
 
   /* Port / Protocol ------------------------------------------- */
-  const protoName = PROTOCOL_MAP[data.protocol] || `Proto ${data.protocol}`;
+  const protoName = PROTOCOL_MAP[data.protocol] || t('proto-unknown', { n: data.protocol });
 
   if (data.port && data.port !== 0) {
-    addKeyValueLine(container, 'Port', `${protoName} ${data.port}`);
+    addKeyValueLine(container, t('field-port'), `${protoName} ${data.port}`);
   } else if (data.port === 0) {
-    addKeyValueLine(container, 'Protocol', protoName);
+    addKeyValueLine(container, t('field-protocol'), protoName);
   }
 
   return container;
@@ -585,7 +616,7 @@ function setRowSelected(rowID) {
   if (selectedConnectionRowId !== null) {
     const selected = document.getElementById(htmlID(selectedConnectionRowId));
     if (selected !== null) {
-      selected.classList.remove('selected');
+      selected.classList.remove('is-selected');
     }
   }
   setSelectedConnectionRowId(rowID);
@@ -593,7 +624,7 @@ function setRowSelected(rowID) {
   if (rowID !== null) {
     const selected = document.getElementById(htmlID(rowID));
     if (selected !== null) {
-      selected.classList.add('selected');
+      selected.classList.add('is-selected');
     }
   }
 }
@@ -771,9 +802,7 @@ window.addEventListener('blur', () => {
   }
 });
 
-// Called by app.js whenever the sort mode changes so that the bytes column
-// can switch between rx, tx, or rx+tx without waiting for a statistics push.
-window.refreshConnectionsBytes = function () {
+function refreshConnectionsBytes() {
   for (const span of document.querySelectorAll('.total-bytes')) {
     const rx = Number(span.dataset.bytesRx || 0);
     const tx = Number(span.dataset.bytesTx || 0);
@@ -781,7 +810,103 @@ window.refreshConnectionsBytes = function () {
     span.style.visibility = text === '' ? 'hidden' : 'visible';
     span.textContent = text;
   }
-};
+}
+
+// Single entry point for all sort-related UI updates. Call after updating
+// state.connectionsSort (via window.app.setConnectionsSort) so that both
+// renderConnectionsHeader and refreshConnectionsBytes read the new value.
+function applyConnectionsSort() {
+  renderConnectionsHeader();
+  refreshConnectionsBytes();
+}
+window.applyConnectionsSort = applyConnectionsSort;
+
+// ----------------------------------------------------
+// Connections table header
+// ----------------------------------------------------
+
+function getTrafficSortOptions() {
+  return [
+    { key: 'totalData',         label: t('sort-total-traffic') },
+    { key: 'totalDataReceived', label: t('sort-bytes-in') },
+    { key: 'totalDataSent',     label: t('sort-bytes-out') },
+  ];
+}
+
+function showConnectionsSortPopup(anchorEl) {
+  const sort = window.app?.getConnectionsSort?.() ?? '';
+  const trafficSortOptions = getTrafficSortOptions();
+  const activeKey = trafficSortOptions.some(o => o.key === sort) ? sort : 'totalData';
+  window.app.showSortPopup(anchorEl, trafficSortOptions, activeKey, (key) => {
+    window.app.setConnectionsSort(key);
+    applyConnectionsSort();
+    window.app.sendAction('setConnectionsSort', { sortBy: key });
+  });
+}
+
+function renderConnectionsHeader(sort) {
+  const headerEl = document.getElementById('connections-header');
+  if (!headerEl) return;
+  headerEl.innerHTML = '';
+
+  if (sort === undefined) {
+    sort = window.app?.getConnectionsSort?.() ?? '';
+  }
+
+  const trafficLabel = sort === 'totalDataReceived' ? t('col-traffic-in')
+    : sort === 'totalDataSent' ? t('col-traffic-out')
+    : t('col-traffic');
+
+  const columns = [
+    { col: 'connection', label: t('col-connection'), sortKey: 'name',          indicator: '▲' },
+    { col: 'rule',       label: t('col-rule'),        sortKey: null,            indicator: null },
+    { col: 'traffic',    label: trafficLabel,          sortKey: 'traffic-popup', indicator: '▼' },
+    { col: 'activity',   label: t('col-activity'),    sortKey: 'lastActivity',  indicator: '▲' },
+  ];
+
+  const trafficActive = sort === 'totalData' || sort === 'totalDataReceived' || sort === 'totalDataSent';
+
+  for (const col of columns) {
+    const cell = document.createElement('div');
+    cell.className = 'connections-th';
+    cell.dataset.col = col.col;
+
+    const isActive = col.sortKey === 'name'          ? sort === 'name'
+      : col.sortKey === 'traffic-popup' ? trafficActive
+      : col.sortKey === 'lastActivity'  ? sort === 'lastActivity'
+      : false;
+
+    if (col.sortKey) {
+      cell.classList.add('is-sortable');
+      if (isActive) cell.classList.add('is-active');
+    }
+
+    const labelSpan = document.createElement('span');
+    labelSpan.textContent = col.label;
+    cell.appendChild(labelSpan);
+
+    if (col.indicator && isActive) {
+      const ind = document.createElement('span');
+      ind.className = 'rules-sort-indicator';
+      ind.textContent = col.indicator;
+      cell.appendChild(ind);
+    }
+
+    if (col.sortKey === 'traffic-popup') {
+      cell.addEventListener('click', () => showConnectionsSortPopup(cell));
+    } else if (col.sortKey) {
+      cell.addEventListener('click', () => {
+        window.app.setConnectionsSort(col.sortKey);
+        applyConnectionsSort();
+        window.app.sendAction('setConnectionsSort', { sortBy: col.sortKey });
+      });
+    }
+
+    headerEl.appendChild(cell);
+  }
+}
+
+renderConnectionsHeader();
 
 // ----------------------------------------------------
 // WebSocket message handlers
@@ -1060,29 +1185,37 @@ function handleUpdateRows(rows) {
 
 function attachRuleButton(rowEl, row) {
   const ruleButton = rowEl.querySelector('.rule-button');
-  if (ruleButton === null) {
-    return;
-  }
   const detailsButton = rowEl.querySelector('.details-button');
   if (detailsButton === null) {
     return;
   }
-  let buttonText = '<span style="filter: opacity(50%)">🟢</span>';
   let detailsButtonIsVisible = false;
+  let isAllow = false;
   if (row !== null) {
-    let isAllow = false;
-    switch (row.rule) {
-      case 'allowByDefault':
-        isAllow = true;
-        buttonText = '<span style="filter: opacity(50%)">🟢</span>';
-        break;
-      case 'allowByRule':
-        buttonText = '🟢';
-        isAllow = true;
-        break;
-      case 'denyByDefault': buttonText = '<span style="filter: opacity(50%)">🔴</span>'; break;
-      case 'denyByRule': buttonText = '🔴'; break;
-      case 'denyByBlocklist': buttonText = '⛔️'; break;
+    isAllow = row.rule === 'allowByDefault' || row.rule === 'allowByRule';
+    if (ruleButton !== null) {
+      let buttonText;
+      switch (row.rule) {
+        case 'allowByDefault':
+          buttonText = '<svg width="14" height="14"><use href="#rule-allow" opacity="0.5"/></svg>';
+          break;
+        case 'allowByRule':
+          buttonText = '<svg width="14" height="14"><use href="#rule-allow"/></svg>';
+          break;
+        case 'denyByDefault':
+          buttonText = '<svg width="14" height="14"><use href="#rule-deny" opacity="0.5"/></svg>';
+          break;
+        case 'denyByRule':    
+          buttonText = '<svg width="14" height="14"><use href="#rule-deny"/></svg>';
+          break;
+        case 'denyByBlocklist': 
+          buttonText = '<svg width="14" height="14"><use href="#rule-blocklist"/></svg>';
+          break;
+        default:
+            buttonText = '<svg width="14" height="14"><use href="#rule-allow" opacity="0.5"/></svg>';
+      }
+      ruleButton.innerHTML = buttonText;
+      ruleButton.dataset.action = isAllow ? 'allow' : 'deny';
     }
     if (row.detailsDiffer) {
       let ref = isAllow ? 'details-differ-red' : 'details-differ-green';
@@ -1096,7 +1229,6 @@ function attachRuleButton(rowEl, row) {
     detailsButton.innerHTML = '<svg><use href="#details-differ-green"></use></svg>';
     detailsButton.style.visibility = 'hidden';
   }
-  ruleButton.innerHTML = buttonText;
 }
 
 function handleUpdateRuleButtons(rows) {
@@ -1106,14 +1238,113 @@ function handleUpdateRuleButtons(rows) {
   }
 }
 
+let _scrollRafId = null;
+
+function animateScrollTo(target, duration, onComplete) {
+  if (_scrollRafId !== null) {
+    cancelAnimationFrame(_scrollRafId);
+    _scrollRafId = null;
+  }
+  const start = listEl.scrollTop;
+  const delta = target - start;
+  if (delta === 0) {
+    onComplete?.();
+    return;
+  }
+  const startTime = performance.now();
+  function tick(now) {
+    const t = Math.min((now - startTime) / duration, 1);
+    const eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    listEl.scrollTop = start + delta * eased;
+    if (t < 1) {
+      _scrollRafId = requestAnimationFrame(tick);
+    } else {
+      _scrollRafId = null;
+      onComplete?.();
+    }
+  }
+  _scrollRafId = requestAnimationFrame(tick);
+}
+
+function highlightRuleButtons(rowIds, action) {
+  if (!rowIds.length) return;
+  const firstEl = document.getElementById(htmlID(rowIds[0]));
+  if (!firstEl) return;
+
+  function animateRow(el) {
+    const ruleBtn = el.querySelector('.rule-button');
+    const sameAction = ruleBtn && ruleBtn.dataset.action === action;
+    const btn = sameAction ? ruleBtn : el.querySelector('.details-button');
+    if (!btn) return;
+    // Remove and re-add the class to allow re-triggering mid-animation.
+    btn.classList.remove('rule-button-bounce');
+    void btn.offsetWidth; // force reflow
+    btn.classList.add('rule-button-bounce');
+    btn.addEventListener('animationend', () => {
+      btn.classList.remove('rule-button-bounce');
+    }, { once: true });
+  }
+
+  function doAnimate() {
+    for (const id of rowIds) {
+      const el = document.getElementById(htmlID(id));
+      if (el) animateRow(el);
+    }
+  }
+
+  function doScroll() {
+    // Rows above firstEl that are still mid-animation (height < rowH) will push
+    // it further down as they finish growing. Add their remaining growth to get
+    // the final position rather than the current one.
+    const rowH = parseFloat(getComputedStyle(listEl).getPropertyValue('--row-h'));
+    let extraOffset = 0;
+    for (const sibling of listEl.children) {
+      if (sibling === firstEl) break;
+      const h = sibling.offsetHeight;
+      if (h < rowH) extraOffset += rowH - h;
+    }
+    const finalTop    = firstEl.offsetTop + extraOffset;
+    const finalBottom = finalTop + rowH;
+    if (finalBottom > listEl.scrollTop + listEl.clientHeight) {
+      animateScrollTo(finalBottom - listEl.clientHeight, 300, doAnimate);
+    } else if (finalTop < listEl.scrollTop) {
+      animateScrollTo(finalTop, 300, doAnimate);
+    } else {
+      doAnimate();
+    }
+  }
+
+  setTimeout(doScroll, 200);
+}
+
 // Per-row flash state: rowId -> { allow: {start} | null, deny: {start} | null, rafId: number | null }
 const _flashState = new Map();
 const FLASH_DURATION = 3000; // ms
 
 // Derive the resting background of the .last-event cell from its current CSS classes,
-// composited over white. Must stay in sync with the .recent-allow / .recent-deny rules in
-// connections.css.
+// pre-composited over the actual surface color for the active theme.
+// Must stay in sync with the .recent-allow / .recent-deny rules in connections.css.
+// Dark-mode detection uses html.dark, which is also the class set by any future
+// system-preference option, so this check remains correct in both cases.
 function _restRgb(cell) {
+  const dark = document.documentElement.classList.contains('dark');
+  if (dark) {
+    // Surface color in dark mode: --surface = #1e2130 = rgb(30, 33, 48)
+    if (cell.classList.contains('recent-allow')) {
+      // rgba(0, 160, 60, 0.15) over rgb(30, 33, 48)
+      return { r: 26, g: 52, b: 50 };
+    }
+    if (cell.classList.contains('recent-deny')) {
+      // rgba(200, 0, 0, 0.13) over rgb(30, 33, 48)
+      return { r: 52, g: 29, b: 42 };
+    }
+    if (cell.classList.contains('recent-mixed')) {
+      // rgba(180, 140, 0, 0.18) over rgb(30, 33, 48)
+      return { r: 57, g: 52, b: 39 };
+    }
+    return { r: 30, g: 33, b: 48 };
+  }
+  // Light mode: surface color = white = rgb(255, 255, 255)
   if (cell.classList.contains('recent-allow')) {
     // rgba(0, 160, 60, 0.15) over white
     return { r: 217, g: 241, b: 226 };
@@ -1213,7 +1444,6 @@ function handleEvents(events) {
 
 function handleSetInspector(msg) {
   setRowSelected(msg.row);
-  const data = msg.data;
 
   const rulesTable = document.getElementById('rules');
   rulesTable.innerHTML = '';                     // clear old content
@@ -1231,7 +1461,7 @@ function handleSetInspector(msg) {
 
   const headline = document.createElement('div');
   headline.className = 'covering-rules-headline';
-  headline.innerHTML = 'Matching Rules';
+  headline.textContent = t('matching-rules');
   rulesTable.appendChild(headline);
 
   const defaultRule = document.createElement('div');
@@ -1245,23 +1475,21 @@ function handleSetInspector(msg) {
 
   const emoji = document.createElement('span');
   emoji.className = 'emoji';
-  emoji.textContent = emojiFor(msg.defaultAction);
+  emoji.innerHTML = emojiFor(msg.defaultAction);
   defaultRule.appendChild(emoji);
 
   const text = document.createElement('span');
   text.className = 'host';
-  if (msg.defaultAction.toLowerCase() === 'allow') {
-    text.textContent = "Default: Allow any connection";
-  } else {
-    text.textContent = "Default: Deny any connection";
-  }
+  text.textContent = msg.defaultAction.toLowerCase() === 'allow'
+    ? t('default-allow')
+    : t('default-deny');
   defaultRule.appendChild(text);
 
   defaultRule.classList.add('inactive');
   rulesTable.appendChild(defaultRule);
   let lastActiveLine = defaultRule;
 
-  data.coveringRules.forEach((r, i) => {
+  msg.coveringRules.forEach((r, i) => {
     let line;
     if (r.type == 'rule') {
       line = renderRule(r, true);
@@ -1276,12 +1504,12 @@ function handleSetInspector(msg) {
   });
   lastActiveLine.classList.remove('inactive');
 
-  if (data.relatedRules && data.relatedRules.length > 0) {
+  if (msg.relatedRules && msg.relatedRules.length > 0) {
     const headline = document.createElement('div');
     headline.className = 'related-rules-headline';
-    headline.innerHTML = 'Related Rules';
+    headline.textContent = t('related-rules');
     rulesTable.appendChild(headline);
-    data.relatedRules.forEach(r => {
+    msg.relatedRules.forEach(r => {
       let line;
       if (r.type == 'rule') {
         line = renderRule(r, false);
