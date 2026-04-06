@@ -9,21 +9,25 @@ It consists of:
   between kernel and user space.
 * The Rust crate `demo-runner`. This is a user-space program which loads
   the eBPF programs into the kernel and demonstrates how to share data
-  with these programs via eBPF maps.
+  with these programs via eBPF maps. It loads two blocklists for
+  demonstration: `blocked_hosts.txt` and `blocked_domains.txt`.
 * `webroot`: This is the JavaScript web UI of Little Snitch for Linux.
 
-All code in this public repo Open Source and distributed under the
-[GNU General Public License, Version 2]. Little Snitch for Linux, the free
-product from [Objective Development](https://obdev.at), also contains
-proprietary code which controls the web UI. This part is free, but not
-Open Source.
+All code in this public repository is Open Source and distributed under
+the [GNU General Public License, Version 2]. It is part of Little Snitch
+for Linux, a free product by [Objective Development](https://obdev.at).
+The full product also includes proprietary code that is not part of this
+repository. While Little Snitch for Linux is free to use, that proprietary
+portion is not Open Source.
+
 
 ## Prerequisites
 
 1. stable rust toolchains: `rustup toolchain install stable`
-1. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
-1. bpf-linker: `cargo install bpf-linker`
-1. the `clang` C/C++ compiler
+2. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
+3. bpf-linker: `cargo install bpf-linker`
+4. the `clang` C/C++ compiler
+
 
 ## Build & Run
 
@@ -33,8 +37,9 @@ Use `cargo build`, `cargo check`, etc. as normal. Run your program with:
 cargo run --release
 ```
 
-Cargo build scripts are used to automatically build the eBPF correctly and include it in the
-program.
+Cargo build scripts automatically build the eBPF programs and include them
+in the binary.
+
 
 ### eBPF
 
