@@ -127,8 +127,9 @@ inline const struct task_struct *task_struct_real_parent(const struct task_struc
 }
 
 inline uid_t task_struct_uid(const struct task_struct *task) {
-	if (task->cred != 0) {
-		return task->cred->uid.val;
+	const struct cred *c = task->cred;
+	if (c != 0) {
+		return c->uid.val;
 	} else {
 		return 0;
 	}
