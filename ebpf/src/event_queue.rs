@@ -5,7 +5,7 @@ use aya_ebpf::{macros::map, maps::RingBuf};
 use common::event::Event;
 
 #[map]
-static EVENT_QUEUE: RingBuf = RingBuf::with_byte_size(100000, 0);
+static EVENT_QUEUE: RingBuf = RingBuf::with_byte_size(1048576, 0);
 
 /// Calls `initializer` to initialize the uninitialized event. If the initializer returns
 /// true, the event is enqueued, if it returns false, it is discarded.
