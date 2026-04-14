@@ -5,14 +5,11 @@ use core::cmp;
 
 use aya_ebpf::{helpers::generated::bpf_skb_load_bytes, macros::map, maps::LruHashMap};
 use common::{
-    NanoTime, StringId,
-    dns_types::{DnsIpv4Key, DnsIpv6Key, DnsNameKey},
-    flow_types::{IpAddress, ProcessPair},
-    repeat::{LoopReturn, repeat},
+    NanoTime, StringId, bpf_string::BpfString, dns_types::{DnsIpv4Key, DnsIpv6Key, DnsNameKey}, flow_types::{IpAddress, ProcessPair}, repeat::{LoopReturn, repeat}
 };
 
 use crate::{
-    context::{Context, DnsMessageHeader, StringAndZero},
+    context::{Context, DnsMessageHeader},
     dn_expand::dn_expand,
     strings_cache::{self, identifier_for_string},
 };
@@ -151,9 +148,9 @@ impl Context {
 
     fn parse_question(&self, index: &mut usize, dns_msg_start_index: u16) -> StringId {
         let string_buffer = &mut self.buffers().string;
-        string_buffer.string.clear(string_buffer.zero);
-        dn_expand(self, index, dns_msg_start_index, &mut string_buffer.string);
-        let question = strings_cache::identifier_for_string(&string_buffer.string);
+        string_buffer.clear();
+        dn_expand(self, index, dns_msg_start_index, string_buffer);
+        let question = strings_cache::identifier_for_string(string_buffer);
         *index += 4; // skip question class (u16) and type (u16), we don't care
         question
     }
@@ -166,8 +163,8 @@ impl Context {
         dns_msg_start_index: u16,
     ) -> Option<()> {
         let string_buffer = &mut self.buffers().string;
-        string_buffer.string.clear(string_buffer.zero);
-        dn_expand(self, index, dns_msg_start_index, &mut string_buffer.string);
+        string_buffer.clear();
+        dn_expand(self, index, dns_msg_start_index, string_buffer);
         let header = &mut self.buffers().dns_rr_header;
         let header_len = size_of_val(header);
         if *index + header_len > self.len() {
@@ -182,7 +179,7 @@ impl Context {
             return None; // data does not fit into message
         }
         if data_class == RR_CLASS_INET {
-            let rr_name = identifier_for_string(&string_buffer.string);
+            let rr_name = identifier_for_string(string_buffer);
             let name_key = DnsNameKey { name: rr_name };
             // When a response comes in:
             //     - find query for the response
@@ -272,17 +269,17 @@ impl Context {
         _process_pair: &ProcessPair,
         mut index: usize,
         dns_msg_start_index: u16,
-        string_buffer: &mut StringAndZero,
+        string_buffer: &mut BpfString,
     ) -> Option<()> {
-        string_buffer.string.clear(string_buffer.zero);
+        string_buffer.clear();
         dn_expand(
             self,
             &mut index,
             dns_msg_start_index,
-            &mut string_buffer.string,
+            string_buffer,
         );
         // ignore len, we anyway don't know what to do if we exceed it
-        let cname = identifier_for_string(&string_buffer.string);
+        let cname = identifier_for_string(string_buffer);
         let cname_key = DnsNameKey { name: cname };
         _ = DNS_CNAMES.insert(&cname_key, &query_name, 0);
         Some(())

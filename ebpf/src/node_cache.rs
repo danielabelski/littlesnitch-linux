@@ -3,7 +3,7 @@
 
 use crate::{
     co_re::*,
-    context::{StaticBuffers, StringAndZero},
+    context::StaticBuffers,
     strings_cache::identifier_for_string,
     unique_id::{Purpose, UniqueId},
 };
@@ -13,20 +13,15 @@ use aya_ebpf::{
 };
 use common::{
     StringId,
+    bpf_string::BpfString,
     node_cache::{MAX_PATH_COMPONENTS, NodeCacheTrait, NodeId, PathNode, PathRep},
 };
-use core::ptr;
+use core::{mem::MaybeUninit, ptr};
 
 #[map]
 static NODE_ID_FOR_NODE: HashMap<PathNode, NodeId> = HashMap::with_max_entries(65536, 0);
 #[map]
 static NODE_FOR_NODE_ID: HashMap<NodeId, PathNode> = HashMap::with_max_entries(65536, 0);
-
-// Keyed by mount ID (mnt_id from struct mount), which uniquely identifies each mounted filesystem
-// instance. We previously used inode number + device ID, but btrfs uses ephemeral device IDs
-// for subvolumes and there is no unique identifier available from userspace *and* kernel.
-#[map]
-static ROOT_NODES: HashMap<u32, NodeId> = HashMap::with_max_entries(8192, 0);
 
 pub struct NodeCache {
     buffers: *mut StaticBuffers,
@@ -39,18 +34,9 @@ impl NodeCache {
     }
 }
 
-impl NodeCacheTrait<Path, StringAndZero> for NodeCache {
-    fn root_node_id(&self, root_path: &Path) -> Option<NodeId> {
-        unsafe {
-            let mut mnt_id: u32 = 0;
-            let mnt_id_ptr = vfsmount_mnt_id_ptr(root_path.mnt as _);
-            bpf_probe_read_kernel(
-                &mut mnt_id as *mut u32 as *mut c_void,
-                core::mem::size_of::<u32>() as u32,
-                mnt_id_ptr as *const c_void,
-            );
-            ROOT_NODES.get(&mnt_id).cloned()
-        }
+impl NodeCacheTrait<Path, BpfString> for NodeCache {
+    fn root_node_id(&self, _root_path: &Path) -> Option<NodeId> {
+        Some(NodeId::ROOT_ID)
     }
 
     fn id_for_node(&self, node: &PathNode) -> Option<NodeId> {
@@ -65,7 +51,7 @@ impl NodeCacheTrait<Path, StringAndZero> for NodeCache {
         unsafe { &mut (*self.buffers).string_ids }
     }
 
-    fn name_id_context(&mut self) -> *mut StringAndZero {
+    fn name_id_context(&mut self) -> *mut BpfString {
         unsafe { &mut (*self.buffers).string }
     }
 
@@ -93,18 +79,14 @@ impl NodeCacheTrait<Path, StringAndZero> for NodeCache {
 }
 
 // We currently obtain the path from a `struct path`, which represents a path within the mounted
-// file system. In order to get absolute paths, we maintain a list of mount points (`ROOT_NODES`)
-// and prepend the file system's mount point to the path's root.
-// In theory, we could reconstruct the absolte path by continuing at the mount point's dentry
+// file system. We reconstruct the absolte path by continuing at the mount point's dentry
 // within the parent mount. This requires access to `struct mount` where we only have
 // `struct vfsmount` from `struct path`. `struct vfsmount` is embedded in `struct mount`, and
 // the kernel uses `container_of()` to get from `struct vfsmount` to `struct mount` (see
-// Linux implementation of `prepend_path()` in `d_path.c`). We need to take that step anyway
-// to find `mnt_id` and it requires a bit of CO-RE acrobatics (see implementation of
-// `vfsmount_mnt_id_ptr()`). Obtaining an integer value via `bpf_probe_read_kernel()` is easy,
-// but not getting a CO-RE pointer to the parent `struct dentry`. So we rather stick with the
-// `ROOT_NODES` approach where the parent information comes from user space.
+// Linux implementation of `prepend_path()` in `d_path.c`). We do the same here by obtaining
+// the struct offsets from the co-re C-module.
 
+#[derive(Clone)]
 pub struct Path {
     // References are static for the time our program runs.
     pub dentry: &'static dentry,
@@ -120,42 +102,147 @@ impl Path {
             }
         }
     }
+
+    pub fn is_root(&self) -> bool {
+        let root_dentry = vfsmount_root(self.mnt);
+        ptr::eq(self.dentry, root_dentry)
+    }
 }
 
 // This implementation of PathRep defines by what path an executable is identified. We choose
 // to work with `struct dentry` for executable identification, not with path strings which
-// would be available in `sched_process_exec()`, because dentry has all symlinks resolved.
-// We stop parent iteration when the dentry matches the mount's root dentry or when it is NULL.
-// This way we exactly reproduce the paths seen from user space.
+// would be available in `sched_process_exec()`, because dentry represents a "realpath".
+// We iterate parent nodes up to the mount's root and then mounts up to the absolute root.
+// We cannot use CO-RE access to struct fields here because there is no CO-RE compliant way to
+// get to `struct mount`. Once we go through `struct mount`, pointers are no longer CO-RE tagged.
+// This happen at the moment we cross a mount point. We therefore use bpf_probe_read_kernel()
+// everywhere to access struct fields. The offsets of the struct fields are obtained in the co-re
+// C-module.
 
-impl PathRep<StringAndZero> for Path {
-    fn name_id(&self, buffer: *mut StringAndZero) -> StringId {
+impl PathRep<BpfString> for Path {
+    fn name_id(&self, buffer: *mut BpfString) -> StringId {
         let buffer = unsafe { &mut *buffer };
-        buffer.string.clear(buffer.zero);
-        buffer.string.update(|bytes| unsafe {
-            let len = (&*dentry_name(self.dentry as _))
-                .__bindgen_anon_1
-                .__bindgen_anon_1
-                .len
-                .min(bytes.len() as _);
-            let r = bpf_probe_read_kernel(
-                bytes as *mut u8 as *mut c_void,
-                len,
-                (&*dentry_name(self.dentry as _)).name as *const c_void,
-            );
-            if r < 0 { 0 } else { len as _ }
-        });
-        identifier_for_string(&buffer.string)
+        buffer.clear();
+        qstr_string(dentry_name(self.dentry as _), buffer);
+        identifier_for_string(buffer)
     }
 
     fn parent(&self) -> Option<Self> {
-        let root_node = unsafe { vfsmount_root(self.mnt) };
-        if !ptr::eq(self.dentry, root_node)
-            && let Some(parent) = unsafe { dentry_parent(self.dentry as *const _).as_ref() }
-        {
-            Some(Path { dentry: parent, mnt: self.mnt })
-        } else {
-            None
+        let parent_dentry = unsafe { dentry_parent(self.dentry as *const _).as_ref() };
+        let Some(parent_dentry) = parent_dentry else {
+            return None;
+        };
+        let original_parent = Path { dentry: parent_dentry, mnt: self.mnt };
+        let mut path = original_parent.clone();
+        let mut i = 0;
+        while path.is_root() && i < 4 {
+            i += 1;
+            let Some(p) = vfsmount_mount_path(path.mnt) else {
+                // All crossings from the parent chain reach the absolute kernel root.
+                if self.is_root() {
+                    // self is itself a mount root with no further ancestry: this IS the
+                    // process root. Terminate without recording its name.
+                    return None;
+                }
+                // self is a normal dentry whose parent happens to be a mount root.
+                // Return the uncrossed mount-root path so the caller records self's name;
+                // the following call will see self.is_root() == true and return None.
+                return Some(original_parent);
+            };
+            path = p;
         }
+        // Self-referential parent: either a genuine filesystem root or a btrfs
+        // alias/disconnected dentry whose d_parent points to itself.  Both cases
+        // must terminate the walk.
+        let path_parent = dentry_parent(path.dentry);
+        if ptr::eq(path.dentry, path_parent) {
+            return None;
+        }
+        Some(path)
+    }
+}
+
+fn dentry_name(dentry: *const dentry) -> *const qstr {
+    unsafe { ((dentry as *const u8).add(dentry_name_offset())) as *const qstr }
+}
+
+fn dentry_parent(dentry: *const dentry) -> *const dentry {
+    let parent_ptr: *const dentry = ptr::null();
+    unsafe {
+        bpf_probe_read_kernel(
+            &parent_ptr as *const *const dentry as _,
+            size_of_val(&parent_ptr) as _,
+            (dentry as *const u8).add(dentry_parent_offset()) as _,
+        );
+    }
+    parent_ptr
+}
+
+fn vfsmount_root(vfsmount: *const vfsmount) -> *const dentry {
+    let root: *const dentry = ptr::null();
+    unsafe {
+        bpf_probe_read_kernel(
+            &root as *const *const dentry as _,
+            size_of_val(&root) as _,
+            (vfsmount as *const u8).add(vfsmount_root_offset()) as _,
+        );
+    }
+    root
+}
+fn vfsmount_mount_path(vfsmount: *const vfsmount) -> Option<Path> {
+    // we must obtain the parent vfsmount and the dentry covered by the mount
+    unsafe {
+        let vfsmount_offset = mount_vfsmount_offset();
+        let mount = (vfsmount as *const u8).sub(vfsmount_offset) as *const mount;
+        let parent_mount = mount_parent(mount);
+        if ptr::eq(parent_mount, mount) {
+            return None;
+        }
+        let parent_vfsmount = (parent_mount as *const u8).add(vfsmount_offset) as *const vfsmount;
+        let mountpoint = mount_mountpoint(mount);
+        Some(Path { dentry: &*mountpoint, mnt: &*parent_vfsmount })
+    }
+}
+
+fn mount_parent(mount: *const mount) -> *const mount {
+    let parent: *const mount = ptr::null();
+    unsafe {
+        bpf_probe_read_kernel(
+            &parent as *const *const mount as _,
+            size_of_val(&parent) as _,
+            (mount as *const u8).add(mount_parent_offset()) as _,
+        );
+    }
+    parent
+}
+
+fn mount_mountpoint(mount: *const mount) -> *const dentry {
+    let mountpoint: *const dentry = ptr::null();
+    unsafe {
+        bpf_probe_read_kernel(
+            &mountpoint as *const *const dentry as _,
+            size_of_val(&mountpoint) as _,
+            (mount as *const u8).add(mount_mountpoint_offset()) as _,
+        );
+    }
+    mountpoint
+}
+
+fn qstr_string(qstr: *const qstr, result: &mut BpfString) {
+    unsafe {
+        let mut qstr_copy = MaybeUninit::<qstr>::uninit();
+        let qstr_ptr = qstr_copy.as_mut_ptr();
+        (*qstr_ptr).__bindgen_anon_1.hash_len = 0;
+        // if the read below fails, our qstr stays at zero and we read an empty string.
+        bpf_probe_read_kernel(qstr_ptr as _, size_of_val(&qstr_copy) as _, qstr as _);
+        result.update(|bytes| {
+            let len = (*qstr_ptr).__bindgen_anon_1.__bindgen_anon_1.len.min(bytes.len() as _);
+            let r = bpf_probe_read_kernel(
+                bytes as *mut u8 as *mut c_void,
+                len,
+                (*qstr_ptr).name as *const c_void,
+            );
+            if r < 0 { 0 } else { len as _ }
+        });
     }
 }

@@ -1,12 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2026 Objective Development Software GmbH
 
-use crate::{ByteAtOffset, DOMAIN_SEP, touch_usize};
+use crate::{
+    ByteAtOffset, DOMAIN_SEP,
+    repeat::{LoopReturn, repeat_closure},
+    touch_usize,
+};
 use core::{
     fmt::{self, Debug},
     mem::MaybeUninit,
     ptr,
-    slice::{from_raw_parts, from_raw_parts_mut},
+    slice::from_raw_parts,
 };
 
 #[derive(PartialEq, Eq)]
@@ -57,14 +61,14 @@ impl BpfString {
     // We must trick the compiler so that it does not know that we are zeroing out memory.
     // If it finds out, it replaces our code with a memset function which works byte-wise,
     // which is much less efficient and blasts our eBPF verifier budget of instructions.
-    pub fn clear(&mut self, zero: u64) {
-        unsafe {
-            let ptr = self as *mut _ as *mut u64;
-            let slice = from_raw_parts_mut(ptr, size_of::<Self>());
-            for i in 0..32 {
-                slice[i] = zero;
+    pub fn clear(&mut self) {
+        let ptr = self as *mut _ as *mut u64;
+        repeat_closure(32, |i| unsafe {
+            if i < 32 {
+                *ptr.add(i) = 0;
             }
-        }
+            LoopReturn::LoopContinue
+        });
     }
 
     pub fn as_slice(&self) -> &[u8] {

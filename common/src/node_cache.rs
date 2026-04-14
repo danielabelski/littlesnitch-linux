@@ -2,11 +2,10 @@
 // Copyright (C) 2026 Objective Development Software GmbH
 
 use crate::StringId;
-use crate::repeat::{LoopReturn, repeat};
+use crate::repeat::{LoopReturn, repeat_closure};
 use core::fmt::{Debug, Formatter, Result};
-use core::marker::PhantomData;
-use core::num::NonZeroU64;
 use core::mem::transmute;
+use core::num::NonZeroU64;
 
 pub const MAX_PATH_COMPONENTS: usize = 256;
 
@@ -25,10 +24,11 @@ impl NodeId {
     // If code is guaranteed to be unreachable, but the compiler and verifier don't know, we
     // cannot panic as we would in user space. In eBPF we must continue somehow. This error
     // node ID can be returned in unreachable code.
-    pub fn error_id() -> Self {
-        // avoid all possible panics by using transmute
-        NodeId(unsafe { transmute(u64::MAX) })
-    }
+    pub const ERROR_ID: Self = Self(unsafe { transmute(u64::MAX) });
+
+    // NodeIds are constructed from a cpu-wide counter and the CPU index in the low 16 bits.
+    // CPU index 0 is reserved for the user space program.
+    pub const ROOT_ID: Self = Self(unsafe { transmute(1u64 << 16) });
 }
 
 impl Debug for NodeId {
@@ -108,45 +108,64 @@ pub trait NodeCacheTrait<P: PathRep<S>, S>: Sized {
     // We consume `P`, assuming that it is either cheap to clone or just a reference to some static
     // data (e.g. Linux dentry structs in the kernel). Ownership makes it easier to hold parents
     // of `path` in the same variable.
-    fn node_id_for_path(&mut self, path: P) -> Option<NodeId> {
-        // Make a separate block holding `NameContext` on the stack in the hope that it's easier
-        // for the compiler to know that `NameContext` and `NodeContext` don't need to live
-        // simultaneously.
-        let (name_ids, depth, root_node_id) = {
-            let mut ctx = NameContext {
-                path,
-                name_ids: unsafe { &mut *self.string_id_buffer() },
-                depth: 0,
-                name_id_context: self.name_id_context(),
-            };
+    fn node_id_for_path(&mut self, mut path: P) -> Option<NodeId> {
+        let name_ids = unsafe { &mut *self.string_id_buffer() };
+        let name_id_context = self.name_id_context();
 
-            // traverse up to the root path and record string ids for each component.
-            repeat(MAX_PATH_COMPONENTS as _, obtain_name_ids_inner, &mut ctx);
-
-            // `path` represents the root node now, as it does not have a parent. Get an ID
-            let root_node_id = match self.root_node_id(&ctx.path) {
-                Some(node) => node,
-                None => return None,
+        // traverse up to the root path and record string ids for each component.
+        let depth = repeat_closure(MAX_PATH_COMPONENTS + 1, |depth| {
+            let Some(parent) = path.parent() else {
+                // This is the root node. Do not store its name.
+                return LoopReturn::LoopBreak;
             };
-            let NameContext {
-                depth, name_ids, ..
-            } = ctx;
-            (name_ids, depth, root_node_id)
+            if depth >= MAX_PATH_COMPONENTS {
+                // Does not happen due to the number of iterations we have set, but the compiler does
+                // not know. It therefore inserts a bounds check which can panic, which is not allowed
+                // by the eBPF verifier. We therefore do the bounds check manually.
+                return LoopReturn::LoopBreak;
+            }
+            name_ids[depth] = path.name_id(name_id_context);
+            path = parent;
+            LoopReturn::LoopContinue
+        });
+        // `depth` should contain the number of entries in name_ids. If the loop ran once, it did
+        // an immediate LoopBreak and no entries were added. We therefore need to subtract one.
+        let depth = depth.saturating_sub(1);
+
+        // `path` represents the root node now, as it does not have a parent. Get an ID
+        let Some(root_node_id) = self.root_node_id(&path) else {
+            return None;
         };
-        let mut ctx = NodeContext {
-            name_ids,
-            depth,
-            node_id: root_node_id,
-            cache: self,
-            phantom1: PhantomData::default(),
-            phantom2: PhantomData::default(),
-        };
+        let mut node_id = root_node_id;
 
         // now iterate back from the root to the leaf:
-        repeat(ctx.depth as _, obtain_node_ids_inner, &mut ctx);
+        repeat_closure(depth, |i| {
+            let current_depth = depth - i - 1;
+            if current_depth >= MAX_PATH_COMPONENTS {
+                // Does not happen due to the number of iterations we have set, but the compiler does
+                // not know. It therefore inserts a bounds check which can panic, which is not allowed
+                // by the eBPF verifier. We therefore do the bounds check manually.
+                return LoopReturn::LoopBreak;
+            }
+            let node = PathNode {
+                parent_id: Some(node_id),
+                name_id: name_ids[current_depth],
+            };
+            node_id = self.id_for_node(&node).unwrap_or_else(|| {
+                let new_id = self.new_id();
+                if self.insert_node(&node, new_id) {
+                    self.consume_id();
+                    new_id
+                } else {
+                    // Another thread beat us – look it up again.
+                    self.id_for_node(&node).unwrap_or(NodeId::ERROR_ID)
+                }
+            });
+            LoopReturn::LoopContinue
+        });
 
         // `node_id` is now the id that represents the original `path`.
-        Some(ctx.node_id)
+        Some(node_id)
     }
 
     fn enumerate_path(&self, mut node_id: NodeId, mut closure: impl FnMut(StringId)) {
@@ -164,74 +183,10 @@ pub trait NodeCacheTrait<P: PathRep<S>, S>: Sized {
     }
 }
 
-struct NameContext<'a, P: PathRep<S>, S> {
-    pub path: P,
-    pub name_ids: &'a mut [StringId; MAX_PATH_COMPONENTS],
-    pub depth: usize,
-    pub name_id_context: *mut S,
-}
-
-extern "C" fn obtain_name_ids_inner<'a, P: PathRep<S>, S>(
-    _index: u64,
-    ctx: &mut NameContext<'a, P, S>,
-) -> LoopReturn {
-    let parent = match ctx.path.parent() {
-        Some(parent) => parent,
-        None => return LoopReturn::LoopBreak,
-    };
-    if ctx.depth >= MAX_PATH_COMPONENTS {
-        // Does not happen due to the number of iterations we have set, but the compiler does
-        // not know. It therefore inserts a bounds check which can panic, which is not allowed
-        // by the eBPF verifier. We therefore do the bounds check manually.
-        return LoopReturn::LoopBreak;
-    }
-    ctx.name_ids[ctx.depth] = ctx.path.name_id(ctx.name_id_context);
-    ctx.depth += 1;
-    ctx.path = parent;
-    LoopReturn::LoopContinue
-}
-
-struct NodeContext<'a, C: NodeCacheTrait<P, S>, P: PathRep<S>, S> {
-    pub cache: &'a mut C,
-    pub name_ids: &'a mut [StringId; MAX_PATH_COMPONENTS],
-    pub depth: usize,
-    pub node_id: NodeId,
-    phantom1: PhantomData<P>, // use `P` to make the compiler happy
-    phantom2: PhantomData<S>, // use `P` to make the compiler happy
-}
-
-extern "C" fn obtain_node_ids_inner<'a, C: NodeCacheTrait<P, S>, P: PathRep<S>, S>(
-    _index: u64,
-    ctx: &mut NodeContext<'a, C, P, S>,
-) -> LoopReturn {
-    ctx.depth -= 1;
-    if ctx.depth >= MAX_PATH_COMPONENTS {
-        // Does not happen due to the number of iterations we have set, but the compiler does
-        // not know. It therefore inserts a bounds check which can panic, which is not allowed
-        // by the eBPF verifier. We therefore do the bounds check manually.
-        return LoopReturn::LoopBreak;
-    }
-    let node = PathNode {
-        parent_id: Some(ctx.node_id),
-        name_id: ctx.name_ids[ctx.depth],
-    };
-    ctx.node_id = ctx.cache.id_for_node(&node).unwrap_or_else(|| {
-        let new_id = ctx.cache.new_id();
-        if ctx.cache.insert_node(&node, new_id) {
-            ctx.cache.consume_id();
-            new_id
-        } else {
-            // Another thread beat us – look it up again.
-            ctx.cache.id_for_node(&node).unwrap_or(NodeId::error_id())
-        }
-    });
-    LoopReturn::LoopContinue
-}
-
 #[cfg(feature = "user")]
 mod pods {
-    use aya::Pod;
     use super::*;
+    use aya::Pod;
 
     unsafe impl Pod for NodeId {}
     unsafe impl Pod for PathNode {}
@@ -296,14 +251,10 @@ mod tests {
     fn test_node_cache() {
         let strings_cache = RefCell::new(MockStringsCache::new());
         let mut node_cache = MockNodeCache::new(&strings_cache);
-        let mock_paths: Vec<_> = TEST_PATHS
-            .iter()
-            .map(|&p| MockPath::new(p, &strings_cache))
-            .collect();
-        let node_ids: Vec<_> = mock_paths
-            .into_iter()
-            .filter_map(|p| node_cache.node_id_for_path(p))
-            .collect();
+        let mock_paths: Vec<_> =
+            TEST_PATHS.iter().map(|&p| MockPath::new(p, &strings_cache)).collect();
+        let node_ids: Vec<_> =
+            mock_paths.into_iter().filter_map(|p| node_cache.node_id_for_path(p)).collect();
         let hashed_ids: HashSet<_> = node_ids.iter().cloned().collect();
         assert!(hashed_ids.len() == node_ids.len()); // check whether there were dudplicates
         for (index, &id) in node_ids.iter().enumerate() {

@@ -53,7 +53,7 @@ pub struct StaticBuffers {
     pub tcp_header: TcpHdr,
     pub udp_header: UdpHdr,
     pub ipv6_option: Ipv6Option,
-    pub string: StringAndZero,
+    pub string: BpfString,
     pub dns_message_header: DnsMessageHeader,
     pub dns_rr_header: DnsResourceRecordHeader,
     pub string_ids: [StringId; MAX_PATH_COMPONENTS],
@@ -85,13 +85,6 @@ pub struct DnsResourceRecordHeader {
     pub data_class: u16,
     pub _ttl: [u16; 2], // represent as array to preserve 2 byte alignment
     pub data_length: u16,
-}
-
-pub struct StringAndZero {
-    pub string: BpfString,
-    // We keep a zero value where the compiler does not know it's zero and therefore can't
-    // "optimize" by substituting a library function for block fill.
-    pub zero: u64,
 }
 
 impl StaticBuffers {
