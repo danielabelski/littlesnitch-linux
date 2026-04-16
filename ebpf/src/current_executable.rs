@@ -15,7 +15,7 @@ use common::{
     NodeFeatures,
     flow_types::ProcessPair,
     node_cache::{NodeCacheTrait, NodeId},
-    repeat::{LoopReturn, repeat},
+    repeat::{LoopReturn, repeat_closure},
 };
 use core::{mem::transmute, ptr};
 
@@ -143,49 +143,38 @@ pub fn get_current_process_pair(
 ) -> Option<()> {
     result.executable_pair.connecting = None;
     result.executable_pair.parent = None;
-    let task = task_struct::current()?;
+    let mut task = task_struct::current()?;
     let mut node_cache = NodeCache::new(buffers);
     result.executable_pair.connecting = task.get_node_id(&mut node_cache);
     result.executable_pair.uid = task.uid();
     result.pid = unsafe { task_struct_tgid(task as _) };
-    let mut ctx = ParentLoopContext { result, node_cache, task };
-
-    repeat(256, parent_lookup_inner, &mut ctx);
-
+    repeat_closure(256, |_| {
+        let parent = match task.parent() {
+            Some(parent) => parent,
+            None => return LoopReturn::LoopBreak,
+        };
+        let parent_tgid = unsafe { task_struct_tgid(parent as _) };
+        if parent_tgid == 1 || ptr::eq(parent, task) {
+            return LoopReturn::LoopBreak; // root process: pid == 1 or is its own parent
+        }
+        task = parent;
+        if let Some(parent_node_id) = parent.get_node_id(&mut node_cache)
+            && Some(parent_node_id) != result.executable_pair.connecting
+        {
+            let features = parent_node_id.features();
+            if features.contains(NodeFeatures::APP_MANAGER) {
+                return LoopReturn::LoopBreak;
+            } else if features.contains(NodeFeatures::NON_PARENT) {
+                return LoopReturn::LoopContinue;
+            }
+            // Consider this as a parent app. The last process before the app manager counts.
+            result.executable_pair.parent = Some(parent_node_id);
+            result.parent_pid = parent_tgid;
+        }
+        LoopReturn::LoopContinue
+    });
     Some(())
 }
-struct ParentLoopContext<'a> {
-    pub result: &'a mut ProcessPair,
-    pub node_cache: NodeCache,
-    pub task: &'a task_struct,
-}
-
-extern "C" fn parent_lookup_inner(_index: u64, ctx: &mut ParentLoopContext) -> LoopReturn {
-    let parent = match ctx.task.parent() {
-        Some(parent) => parent,
-        None => return LoopReturn::LoopBreak,
-    };
-    let parent_tgid = unsafe { task_struct_tgid(parent as _) };
-    if parent_tgid == 1 || ptr::eq(parent, ctx.task) {
-        return LoopReturn::LoopBreak; // root process: pid == 1 or is its own parent
-    }
-    ctx.task = parent;
-    if let Some(parent_node_id) = parent.get_node_id(&mut ctx.node_cache)
-        && Some(parent_node_id) != ctx.result.executable_pair.connecting
-    {
-        let features = parent_node_id.features();
-        if features.contains(NodeFeatures::APP_MANAGER) {
-            return LoopReturn::LoopBreak;
-        } else if features.contains(NodeFeatures::NON_PARENT) {
-            return LoopReturn::LoopContinue;
-        }
-        // Consider this as a parent app. The last process before the app manager counts.
-        ctx.result.executable_pair.parent = Some(parent_node_id);
-        ctx.result.parent_pid = parent_tgid;
-    }
-    LoopReturn::LoopContinue
-}
-
 trait FileNodeAppManager {
     fn features(&self) -> NodeFeatures;
 }

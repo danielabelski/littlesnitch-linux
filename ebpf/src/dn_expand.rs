@@ -54,6 +54,7 @@ fn dn_expand_to_buffer<P: PacketProvider>(
         dns_msg_start_index,
         did_jump: false,
     };
+    // cannot use repeat_closure(), exceeds stack size
     repeat(126, dn_expand_inner, &mut ctx);
     if !ctx.did_jump {
         *ctx.index_ref = ctx.src_index;
