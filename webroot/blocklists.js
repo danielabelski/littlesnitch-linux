@@ -41,12 +41,60 @@ let highlightedEntry = null; // { blocklistId, entryType, value }
 let pendingLocateEntry = null; // { blocklistId, entryType, value, index, inFlight }
 let pendingAddedEntryValues = null; // Set<string> of values just submitted via addUserBlocklistEntries
 let pendingScrollToAdded = false; // scroll to the first newly added entry once
+
 function getUpdatePeriodPresetOptions() {
   return [
     { minutes: 60,    label: t('update-every-hour') },
     { minutes: 360,   label: t('update-every-6-hours') },
     { minutes: 1440,  label: t('update-every-day') },
     { minutes: 10080, label: t('update-every-week') },
+  ];
+}
+
+function blocklistPresets() {
+  return [
+    {
+      name: t('preset-name-none'),
+      description: '',
+      url: '',
+      namesAreHosts: false
+    },
+    {
+      name: 'Peter Lowe',
+      description: t('preset-description-lowe'),
+      url: 'https://pgl.yoyo.org/adservers/serverlist.php?hostformat=plain&mimetype=plaintext',
+      namesAreHosts: false
+    },
+    {
+      name: 'Hagezi Multi PRO',
+      description: t('preset-description-hagezi-pro'),
+      url: 'https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/pro.txt',
+      namesAreHosts: false
+    },
+    {
+      name: 'Hagezi Threat Intelligence Medium',
+      description: t('preset-description-hagezi-threat'),
+      url: 'https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/wildcard/tif.medium-onlydomains.txt',
+      namesAreHosts: false
+    },
+    {
+      name: 'OISD.nl',
+      description: t('preset-description-oisd'),
+      url: 'https://big.oisd.nl/domainswild2',
+      namesAreHosts: false
+    },
+    {
+      name: '1Hosts Lite',
+      description: t('preset-description-1hosts'),
+      url: 'https://github.com/badmojr/1Hosts/raw/master/Lite/domains.txt',
+      namesAreHosts: false
+    },
+    {
+      name: 'FireHOL Level 1',
+      description: t('preset-description-firehol'),
+      url: 'https://iplists.firehol.org/files/firehol_level1.netset',
+      namesAreHosts: false
+    }
   ];
 }
 
@@ -487,6 +535,33 @@ function ensureAddBlocklistDialog() {
   title.textContent = t('dlg-add-blocklist-title');
   form.appendChild(title);
 
+  const presetLabel = document.createElement('label');
+  presetLabel.className = 'edit-dialog-label';
+  presetLabel.textContent = t('preset-label');
+  const presetSelect = document.createElement('select');
+  presetSelect.className = 'edit-dialog-select';
+  presetSelect.name = 'preset';
+
+  const presets = blocklistPresets();
+  presets.forEach((preset, index) => {
+    const opt = document.createElement('option');
+    opt.value = String(index);
+    opt.textContent = preset.name;
+    presetSelect.appendChild(opt);
+  });
+  presetSelect.addEventListener('change', () => {
+    const preset = presets[Number(presetSelect.value)];
+    if (preset) {
+      nameInput.value = preset.name;
+      descriptionInput.value = preset.description;
+      urlInput.value = preset.url;
+      namesAreHostsInput.checked = preset.namesAreHosts;
+    }
+  });
+
+  presetLabel.appendChild(presetSelect);
+  form.appendChild(presetLabel);
+
   const nameLabel = document.createElement('label');
   nameLabel.className = 'edit-dialog-label';
   nameLabel.textContent = t('dlg-name-label');
@@ -504,7 +579,7 @@ function ensureAddBlocklistDialog() {
   const descriptionInput = document.createElement('textarea');
   descriptionInput.className = 'edit-dialog-textarea';
   descriptionInput.name = 'description';
-  descriptionInput.rows = 3;
+  descriptionInput.rows = 5;
   descriptionLabel.appendChild(descriptionInput);
   form.appendChild(descriptionLabel);
 
@@ -686,8 +761,8 @@ function setupBlocklistDetailsHeaderAddButton() {
         const d = ensureBlocklistDetails(getSelectedBlocklistId());
         const entries = d
           ? Array.from(d.entries.values())
-              .filter((e) => selectedIds.has(entrySelectionKey(e.entryType, e.value)))
-              .map((e) => ({ entryType: e.entryType, value: e.value }))
+            .filter((e) => selectedIds.has(entrySelectionKey(e.entryType, e.value)))
+            .map((e) => ({ entryType: e.entryType, value: e.value }))
           : [];
         window.app.sendAction('removeUserBlocklistEntries', { entries });
       }
