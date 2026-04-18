@@ -20,6 +20,7 @@ let addBlocklistNamesAreHosts = null;
 let addBlocklistUpdatePeriod = null;
 let addBlocklistTitle = null;
 let addBlocklistConfirm = null;
+let addBlocklistPresetRow = null;
 let editBlocklistId = null;
 let addUserEntriesDialog = null;
 let addUserEntriesError = null;
@@ -561,6 +562,7 @@ function ensureAddBlocklistDialog() {
 
   presetLabel.appendChild(presetSelect);
   form.appendChild(presetLabel);
+  addBlocklistPresetRow = presetLabel;
 
   const nameLabel = document.createElement('label');
   nameLabel.className = 'edit-dialog-label';
@@ -662,6 +664,7 @@ function openBlocklistModal(blocklist) {
   setAddBlocklistError('');
   if (blocklist) {
     editBlocklistId = blocklist.id;
+    addBlocklistPresetRow.style.display = 'none';
     addBlocklistTitle.textContent = t('dlg-edit-blocklist-title');
     addBlocklistConfirm.textContent = t('btn-save');
     addBlocklistName.value = blocklist.name || '';
@@ -671,6 +674,7 @@ function openBlocklistModal(blocklist) {
     setUpdatePeriodOptions(blocklist.updatePeriodMinutes);
   } else {
     editBlocklistId = null;
+    addBlocklistPresetRow.style.display = '';
     addBlocklistTitle.textContent = t('dlg-add-blocklist-title');
     addBlocklistConfirm.textContent = t('btn-add');
     addBlocklistDialog.querySelector('form')?.reset();
