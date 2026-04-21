@@ -28,6 +28,11 @@ portion is not Open Source.
 3. bpf-linker: `cargo install bpf-linker`
 4. the `clang` C/C++ compiler
 
+Note: eBPF is a bit fragile. The kernel verifier may reject the program
+after changes in the verifier itself or in the Rust compiler. This code is
+known to pass the verifier on Linux kernels 6.12 to 7.0 when compiled with
+Rust 1.93.0-nightly (2d4fa1395 2025-11-12). Other Rust versions may or may
+not work.
 
 ## Build & Run
 
