@@ -39,7 +39,9 @@ use crate::{
     dns_cache::name_for_address,
     event_queue::enqueue_event,
     filter_engine_connection::FilterEngineConnection,
+    helpers::read_at_offset,
     kernel_filter_model::KernelFilterModel,
+    node_cache::Path,
     socket_properties::get_socket_properties,
 };
 use aya_ebpf::{
@@ -48,9 +50,12 @@ use aya_ebpf::{
         sk_action::{SK_DROP, SK_PASS},
     },
     helpers::generated::bpf_get_socket_cookie,
-    macros::{cgroup_skb, cgroup_sock, cgroup_sock_addr, fentry, fexit, tracepoint},
+    macros::{
+        cgroup_skb, cgroup_sock, cgroup_sock_addr, fentry, fexit, kprobe, kretprobe, tracepoint,
+    },
     programs::{
-        FEntryContext, FExitContext, SkBuffContext, SockAddrContext, SockContext, TracePointContext,
+        FEntryContext, FExitContext, ProbeContext, RetProbeContext, SkBuffContext, SockAddrContext,
+        SockContext, TracePointContext,
     },
 };
 use aya_log_ebpf::error;
@@ -125,7 +130,8 @@ pub fn fentry_bprm_execve(ctx: FEntryContext) -> i32 {
     // is unlikely.
     unsafe {
         let bprm: *const linux_binprm = ctx.arg(0);
-        report_exec_attempt_with_path(&*linux_binprm_path(bprm));
+        let path = Path::new(&*linux_binprm_path(bprm));
+        report_exec_attempt_with_path(path);
     }
     0 // return value is ignored
 }
@@ -133,6 +139,28 @@ pub fn fentry_bprm_execve(ctx: FEntryContext) -> i32 {
 #[fexit(function = "bprm_execve")] // since Linux 5.5
 pub fn fexit_bprm_execve(ctx: FExitContext) -> i32 {
     let return_value: i32 = ctx.arg(1);
+    report_exec_success(return_value);
+    0 // return value is ignored
+}
+
+// This is an alternative to fentry_bprm_execve(). It is used if the kernel does not allow tracing.
+#[kprobe]
+fn kprobe_bprm_execve(ctx: ProbeContext) -> Option<()> {
+    unsafe {
+        let bprm: *const linux_binprm = ctx.arg(0)?;
+        let file: *const file = read_at_offset(bprm, linux_binprm_file_offset())?;
+        let dentry: &dentry = read_at_offset(file, file_path_offset() + path_dentry_offset())?;
+        let mnt: &vfsmount = read_at_offset(file, file_path_offset() + path_mnt_offset())?;
+        let path = Path { dentry, mnt };
+        report_exec_attempt_with_path(path);
+    }
+    Some(()) // return value is ignored
+}
+
+// This is an alternative to fexit_bprm_execve(). It is used if the kernel does not allow tracing.
+#[kretprobe]
+pub fn kretprobe_bprm_execve(ctx: RetProbeContext) -> u32 {
+    let return_value: i32 = ctx.ret();
     report_exec_success(return_value);
     0 // return value is ignored
 }

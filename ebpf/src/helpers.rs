@@ -1,15 +1,34 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2026 Objective Development Software GmbH
 
-use aya_ebpf::programs::SkBuffContext;
+use aya_ebpf::{cty::c_void, helpers::generated::bpf_probe_read_kernel, programs::SkBuffContext};
 use aya_log_ebpf::error;
+use core::{cmp::min, mem::MaybeUninit};
 
-use core::cmp::min;
-fn try_hexdump(ctx: &SkBuffContext) -> Result<(), i64>{
+/// Copy kernel memory to result. Can be used to access struct fields when the field offset
+/// is known.
+#[inline(always)]
+pub fn read_at_offset<P, T>(ptr: *const P, offset: usize) -> Option<T> {
+    unsafe {
+        let mut value = MaybeUninit::<T>::uninit();
+        if bpf_probe_read_kernel(
+            value.as_mut_ptr() as *mut c_void,
+            size_of_val(&value) as u32,
+            (ptr as *const u8).add(offset) as _,
+        ) == 0
+        {
+            Some(value.assume_init())
+        } else {
+            None
+        }
+    }
+}
+
+fn try_hexdump(ctx: &SkBuffContext) -> Result<(), i64> {
     let len = min(128, ctx.skb.len() as usize);
     let mut offset = 0;
     error!(ctx, "packet of length {}:", len);
-    for _ in 0..(len/8) {
+    for _ in 0..(len / 8) {
         let d0: u8 = ctx.skb.load(offset + 0)?;
         let d1: u8 = ctx.skb.load(offset + 1)?;
         let d2: u8 = ctx.skb.load(offset + 2)?;

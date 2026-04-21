@@ -43,9 +43,9 @@ static RUNNING_EXEC_PARAMS: LruHashMap<i32, NodeId> = LruHashMap::with_max_entri
 /// Although we get the function parameters in the exit hook, the struct pointed to has been
 /// modified and the data we need is no longer available on exit.
 /// We may have to move the PID later if it moves to a different CGROUP.
-pub fn report_exec_attempt_with_path(path: &path) {
+#[inline(always)]   // only one of the two call sites will ever be used
+pub fn report_exec_attempt_with_path(path: Path) {
     // unsafe { bpf_printk!(b"%d%d%d exec_with_path %pks", 1, 1, 1, (*path.dentry).d_name.name); }
-    let path = Path::new(path);
     let buffers = StaticBuffers::get(ConcurrencyGroup::FentryExec);
     if buffers.is_null() {
         return;

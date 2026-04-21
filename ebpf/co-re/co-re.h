@@ -172,6 +172,22 @@ inline size_t mount_mountpoint_offset(void) {
 	return __builtin_preserve_field_info(((struct mount *)0)->mnt_mountpoint, 0);
 }
 
+inline size_t linux_binprm_file_offset(void) {
+	return __builtin_preserve_field_info(((struct linux_binprm *)0)->file, 0);
+}
+
+inline size_t file_path_offset(void) {
+	return __builtin_preserve_field_info(((struct file *)0)->f_path, 0);
+}
+
+inline size_t path_dentry_offset(void) {
+	return __builtin_preserve_field_info(((struct path *)0)->dentry, 0);
+}
+
+inline size_t path_mnt_offset(void) {
+	return __builtin_preserve_field_info(((struct path *)0)->mnt, 0);
+}
+
 inline const struct path *linux_binprm_path(const struct linux_binprm *binprm) {
 	return &binprm->file->f_path;
 }
