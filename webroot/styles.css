@@ -34,7 +34,7 @@
   --row-hover-bg: var(--hover);
   --row-selected-bg: var(--accent-soft);
   --row-selected-hover-bg: var(--hover);
-  
+
   --selection-border: #8dbce6;
   --chart-select-bg: rgba(13, 106, 191, 0.12);
 
@@ -181,6 +181,7 @@ input[type="search"]::-webkit-search-results-decoration {
   flex-direction: column;
   gap: 12px;
   padding: 14px;
+  min-height: 650px;
 }
 
 .app-header {
@@ -259,6 +260,7 @@ input[type="search"]::-webkit-search-results-decoration {
   background: var(--hover);
   color: var(--text);
 }
+
 
 .offline-indicator {
   align-self: center;
@@ -997,4 +999,155 @@ main {
 
 .is-disabled > * {
   opacity: var(--disabled-opacity);
+}
+
+@media (max-width: 950px) {
+  .u-inline {
+    display: none !important;
+  }
+
+  .app-shell {
+    min-height: 850px !important;
+  }
+
+  .rules-table td:nth-child(4),
+  .rules-table td:nth-child(6),
+  .rules-table th:nth-child(4),
+  .rules-table th:nth-child(6) {
+    display: none !important;
+  }
+
+}
+
+@media (max-width:400px) {
+
+  .rules-table td:nth-child(3),
+  .rules-table th:nth-child(3) {
+    display: none !important;
+  }
+}
+
+@media (max-width:700px) {
+  .traffic-chart-wrap {
+    display: none !important;
+  }
+}
+
+
+@media (max-width: 834px) {
+  .undo-widget {
+    position: absolute;
+    top: 105px;
+    left: 8px;
+  }
+
+  .offline-indicator {
+    position: absolute;
+    margin-top: 100px;
+    margin-left: 10px;
+    z-index: 999999;
+  }
+
+  body {
+    min-width: auto;
+  }
+
+  .app-shell {
+    height: 100vh;
+  }
+
+  .app-header {
+    margin-bottom: 50px;
+  }
+
+  .header-tabs {
+    position: absolute;
+    margin-top: 120px;
+    margin-left: 10px;
+    gap: 2px;
+  }
+
+  .tab {
+    padding: 0px 12px;
+  }
+
+  .filter-switch {
+    display: contents;
+    margin: 30px auto;
+    float: left;
+  }
+
+  .filter-switch-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: auto;
+  }
+
+  .section-topbar {
+    display: block;
+  }
+
+  .control-group {
+    margin: 10px;
+    display: block;
+  }
+
+  .filter-btn {
+    display: flex;
+    width: 100%;
+    margin-top: 10px;
+  }
+
+  .menu-select.compact {
+    width: 100%;
+    margin-top: 10px;
+    max-width: none;
+  }
+
+  .search-wrap {
+    display: block;
+  }
+
+  .search-wrap>svg {
+    position: relative;
+    top: 4px;
+  }
+
+  .split-layout {
+    display: block;
+  }
+
+  .left-pane {
+    width: 100% !important;
+    display: block;
+    overflow-y: auto;
+    height: 50%;
+    scroll-behavior: smooth;
+  }
+
+  .right-pane {
+    height: 50%;
+    width: 100% !important;
+    min-width: 180px !important;
+    display: block;
+    width: 100%;
+    overflow: scroll;
+    scroll-behavior: smooth;
+  }
+
+  .splitter {
+    height: 4px;
+    width: 100%;
+  }
+
+  .pane-content {
+    min-height: 180px;
+    overflow: scroll;
+  }
+
+  .search-clear-button {
+    top: 8px;
+  }
+
 }

@@ -57,6 +57,7 @@
       window.location.host !== ""
         ? `${protocol}//${window.location.host}/stream`
         : "ws://127.0.0.1:3031/stream";
+    tempSURL = null;
     const socket = new WebSocket(socketUrl);
 
     socket.addEventListener("open", () => {
@@ -965,47 +966,72 @@
     });
   }
 
-  function setupSplitters() {
+  let _splitterMode = null;
+  let _splitterCleanup = null;
+  addEventListener("resize", (event) => { updateSplitters(); });
+  function updateSplitters() {
+    const bodyWidth = parseInt(getComputedStyle(document.body).width.slice(0,-2));
+    const isSmallScreen = bodyWidth <= 834;
+    const mode = isSmallScreen ? "vertical" : "horizontal";
+    if (mode === _splitterMode) return;
+    _splitterMode = mode;
+    if (_splitterCleanup) { _splitterCleanup(); _splitterCleanup = null; }
+    const min = 180;
+    const cursor = isSmallScreen ? "row-resize" : "col-resize";
+    const cleanups = [];
     const splitLayouts = Array.from(document.querySelectorAll(".split-layout"));
-
     splitLayouts.forEach((layout) => {
+      const splitter = layout.querySelector('.splitter');
       const left = layout.querySelector('[data-role="left-pane"]');
       const right = layout.querySelector('[data-role="right-pane"]');
-      const splitter = layout.querySelector('[data-role="splitter"]');
-
-      if (!left || !right || !splitter) {
-        return;
-      }
-
+      if (!left || !right || !splitter) return;
+      left.style.width = "";
+      left.style.height = "";
+      right.style.width = "";
+      right.style.height = "";
+      splitter.style.cursor = cursor;
       let dragging = false;
-
-      splitter.addEventListener("mousedown", (event) => {
-        event.preventDefault();
+      const onMouseDown = (e) => {
+        e.preventDefault();
         dragging = true;
-        document.body.style.cursor = "col-resize";
-      });
-
-      window.addEventListener("mouseup", () => {
-        dragging = false;
-        document.body.style.cursor = "";
-      });
-
-      window.addEventListener("mousemove", (event) => {
-        if (!dragging) {
-          return;
+        document.body.style.cursor = cursor;
+      };
+      const onMouseUp = () => {
+        if (dragging) {
+          dragging = false;
+          document.body.style.cursor = "";
         }
-
-        const rect = layout.getBoundingClientRect();
-        const min = 180;
-        const max = rect.width - 180;
-        let nextLeftWidth = event.clientX - rect.left;
-        nextLeftWidth = Math.max(min, Math.min(nextLeftWidth, max));
-
-        left.style.width = `${nextLeftWidth}px`;
-        right.style.width = `calc(100% - ${nextLeftWidth}px - ${splitter.offsetWidth}px)`;
+      };
+      const onMouseMove = (e) => {
+        if (!dragging) return;
+        if (isSmallScreen) {
+          left.style.width = "";
+          right.style.width = "";
+          const rect = layout.getBoundingClientRect();
+          const nextSize = Math.max(min, Math.min(e.clientY - rect.top, rect.height - min));
+          left.style.height = `${nextSize}px`;
+          right.style.height = `calc(100% - ${nextSize}px - ${splitter.offsetHeight}px)`;
+        } else {
+          left.style.height = "";
+          right.style.height = "";
+          const rect = layout.getBoundingClientRect();
+          const nextSize = Math.max(min, Math.min(e.clientX - rect.left, rect.width - min));
+          left.style.width = `${nextSize}px`;
+          right.style.width = `calc(100% - ${nextSize}px - ${splitter.offsetWidth}px)`;
+        }
+      };
+      splitter.addEventListener("mousedown", onMouseDown);
+      window.addEventListener("mouseup", onMouseUp);
+      window.addEventListener("mousemove", onMouseMove);
+      cleanups.push(() => {
+        splitter.removeEventListener("mousedown", onMouseDown);
+        window.removeEventListener("mouseup", onMouseUp);
+        window.removeEventListener("mousemove", onMouseMove);
       });
     });
+    _splitterCleanup = () => cleanups.forEach(fn => fn());
   }
+
 
   function setupGlobalHooks() {
     function getConnectionsSort() {
@@ -1099,7 +1125,7 @@
     setupConnectionFilters();
     setupKeyboardNavigation();
     setupPauseUpdatesPing();
-    setupSplitters();
+    updateSplitters();
     setupOutsideClickClose();
     setupAboutDialog();
     setupUndoWidget();

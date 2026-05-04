@@ -358,37 +358,60 @@
     };
   }
 
-  function setupHSplitter(wrap) {
+  let _hSplitterMode = null;
+  let _hSplitterCleanup = null;
+  addEventListener("resize", (event) => { updateHSplitter(document.getElementById("traffic-chart")); });
+  function updateHSplitter(wrap) {
     const section = document.querySelector('.section[data-section="connections"]');
     const handle = section?.querySelector('[data-role="h-splitter"]');
     if (!handle) return;
+    const bodyWidth = parseInt(getComputedStyle(document.body).width.slice(0, -2));
+    const isChartOnDisplay = bodyWidth >= 700;
+    const isSmallScreen = bodyWidth <= 834;
+    const mode = `${isChartOnDisplay}:${isSmallScreen}`;
+    if (mode === _hSplitterMode) return;
+    _hSplitterMode = mode;
+    if (_hSplitterCleanup) { _hSplitterCleanup(); _hSplitterCleanup = null; }
 
+    const topPane = document.querySelector(".split-layout");
+    const rect = topPane.getBoundingClientRect();
     let dragging = false;
     let startY = 0;
     let startH = 0;
     const MIN_H = 80;
     const MAX_H = 600;
 
-    handle.addEventListener("mousedown", e => {
+    const onMouseDown = (e) => {
       e.preventDefault();
       dragging = true;
       startY = e.clientY;
       startH = wrap.getBoundingClientRect().height;
       document.body.style.cursor = "row-resize";
-    });
-
-    window.addEventListener("mouseup", () => {
+    };
+    const onMouseUp = () => {
       if (dragging) {
         dragging = false;
         document.body.style.cursor = "";
       }
-    });
-
-    window.addEventListener("mousemove", e => {
+    };
+    const onMouseMove = (e) => {
       if (!dragging) return;
       const newH = Math.max(MIN_H, Math.min(MAX_H, startH + (startY - e.clientY)));
       wrap.style.height = newH + "px";
-    });
+      if (isChartOnDisplay && isSmallScreen) {
+        let nextTopHeight = e.clientY - rect.top;
+        nextTopHeight = Math.max(180, Math.min(nextTopHeight, MAX_H));
+        topPane.style.height = `${nextTopHeight}px`;
+      }
+    };
+    handle.addEventListener("mousedown", onMouseDown);
+    window.addEventListener("mouseup", onMouseUp);
+    window.addEventListener("mousemove", onMouseMove);
+    _hSplitterCleanup = () => {
+      handle.removeEventListener("mousedown", onMouseDown);
+      window.removeEventListener("mouseup", onMouseUp);
+      window.removeEventListener("mousemove", onMouseMove);
+    };
   }
 
   function setupModeSelector(wrap) {
@@ -462,8 +485,8 @@
 
   function chartSize(element) {
     // 1. Get the width including padding (clientWidth)
-    const clientWidth = element.clientWidth; 
-    const clientHeight = element.clientHeight 
+    const clientWidth = element.clientWidth;
+    const clientHeight = element.clientHeight
 
     // 2. Get the computed CSS styles
     const style = window.getComputedStyle(element);
@@ -525,7 +548,7 @@
     });
     ro.observe(wrap);
 
-    setupHSplitter(wrap);
+    updateHSplitter(wrap);
   }
 
   function handleSetTrafficData(msg) {
