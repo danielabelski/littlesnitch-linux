@@ -33,6 +33,7 @@
   let isMouseInsideWindow = true;
   let undoStack = [];
   let undoTimerId = null;
+  let lastSoftwareUpdate = null;
 
   function setOfflineIndicator(isOffline) {
     const indicator = document.querySelector('[data-role="offline-indicator"]');
@@ -210,6 +211,9 @@
           break;
         case "globalSettings":
           handleSetGlobalSettings(msg);
+          break;
+        case "softwareUpdate":
+          handleSoftwareUpdate(msg);
           break;
         default:
           console.warn("Unknown msg from server", JSON.stringify(msg));
@@ -800,6 +804,101 @@
       } else {
         link.hidden = true;
       }
+    }
+    renderAboutUpdateInfo();
+  }
+
+  function handleSoftwareUpdate(msg) {
+    lastSoftwareUpdate = msg;
+    renderAboutUpdateInfo();
+    const banner = document.querySelector('[data-role="update-banner"]');
+    if (!banner) return;
+    if (!msg.isNewer || msg.isSnoozed || !msg.updateCheckEnabled || msg.updateIntervalHours === 0) {
+      banner.hidden = true;
+      return;
+    }
+    const latestVersion = msg.status?.latestVersion ?? '';
+    const textEl = banner.querySelector('[data-role="update-banner-text"]');
+    if (textEl) {
+      textEl.textContent = t('update-available', { latestVersion, currentVersion: msg.currentVersion });
+    }
+    const downloadBtn = banner.querySelector('[data-role="update-download-btn"]');
+    if (downloadBtn instanceof HTMLAnchorElement) {
+      if (msg.downloadUrl) {
+        downloadBtn.href = msg.downloadUrl;
+        downloadBtn.hidden = false;
+      } else {
+        downloadBtn.hidden = true;
+      }
+    }
+    const snoozeBtn = banner.querySelector('[data-role="update-snooze-btn"]');
+    if (snoozeBtn) {
+      snoozeBtn.onclick = () => sendAction('snoozeSoftwareUpdate', { snoozeForMinutes: 60 * 24 });
+    }
+    const skipBtn = banner.querySelector('[data-role="update-skip-btn"]');
+    if (skipBtn) {
+      skipBtn.onclick = () => sendAction('snoozeSoftwareUpdate', { version: latestVersion });
+    }
+    banner.hidden = false;
+  }
+
+  function renderAboutUpdateInfo() {
+    const dialog = document.getElementById('about-dialog');
+    if (!dialog) return;
+    const container = dialog.querySelector('[data-role="about-update-info"]');
+    if (!container) return;
+    container.textContent = '';
+
+    const msg = lastSoftwareUpdate;
+    if (!msg || !msg.updateCheckEnabled) return;
+
+    const addLine = (text) => {
+      const div = document.createElement('div');
+      div.textContent = text;
+      container.appendChild(div);
+    };
+
+    const addCheckNowBtn = () => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'about-check-now-btn';
+      btn.textContent = t('about-check-now');
+      btn.onclick = () => sendAction('checkForUpdate');
+      container.appendChild(btn);
+    };
+
+    if (msg.isNewer && msg.status?.latestVersion) {
+      const div = document.createElement('div');
+      const text = t('about-update-newer', { version: msg.status.latestVersion });
+      if (msg.downloadUrl) {
+        const a = document.createElement('a');
+        a.href = msg.downloadUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.className = 'about-update-link';
+        a.textContent = text;
+        div.appendChild(a);
+      } else {
+        div.textContent = text;
+      }
+      container.appendChild(div);
+    }
+
+    if (msg.status?.lastError) {
+      addLine(t('about-update-error', { error: msg.status.lastError }));
+      if (msg.status.lastFailedCheck) {
+        addLine(t('about-last-checked', { time: formatDateTime(msg.status.lastFailedCheck / 1e9, false) }));
+      }
+      if (msg.status.lastSuccessfulCheck) {
+        addLine(t('about-last-successful', { time: formatDateTime(msg.status.lastSuccessfulCheck / 1e9, false) }));
+      }
+      addCheckNowBtn();
+    } else if (!msg.isNewer) {
+      addLine(t('about-up-to-date'));
+      if (msg.status?.lastSuccessfulCheck) {
+        addLine(t('about-last-checked', { time: formatDateTime(msg.status.lastSuccessfulCheck / 1e9, false) }));
+      }
+      addCheckNowBtn();
     }
   }
 

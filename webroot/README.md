@@ -128,6 +128,8 @@ Sent by `app.js`:
 
 - `setSection`
 - `setFilterDisabled` — sent when the user toggles the header filter switch; payload: `{ filterDisabled: bool }`
+- `snoozeSoftwareUpdate` — sent by the update banner buttons; payload: `{ snoozeForMinutes: number }` (Remind me later, sets 24 h snooze) or `{ version: string }` (Skip this version, marks that version as permanently snoozed)
+- `checkForUpdate` — sent by the "Check now" button in the about dialog; no payload; triggers an immediate software update check on the backend
 - `undo` — sent when the user clicks the bubble or a dropdown row; payload: `{ itemId }`
 - `logout` — sent when the user clicks the logout menu item; ends the authenticated session
 - `setSearch` (Connections, Blocklists; Rules search is local in `rules.js`)
@@ -199,6 +201,7 @@ Handled by `app.js` router:
   by `setLocalizationTable()` (`localization.js`), which merges the table, then calls
   `applyLocalizationToDOM()`, `window.applyConnectionsSort()`, and `window.rebuildTrafficPlot()`
 - `globalSettings` — sets global state; currently carries `filterDisabled: bool`; handled in `app.js` by `handleSetGlobalSettings()`, which updates `state.filterDisabled` and the header filter switch
+- `softwareUpdate` — updates the header banner (shown when `isNewer && !isSnoozed`) and the about dialog update info section (always shown when `updateIntervalHours != 0`, regardless of snooze); fields: `isNewer`, `isSnoozed`, `currentVersion`, `updateIntervalHours`, `status.latestVersion`, `status.lastError`, `status.lastSuccessfulCheck`, `status.lastFailedCheck` (WallTime = nanoseconds), `downloadUrl`; handled in `app.js` by `handleSoftwareUpdate()` and `renderAboutUpdateInfo()`
 
 ## Section Notes
 

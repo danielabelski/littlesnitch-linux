@@ -74,6 +74,7 @@
   --warning-border: #e6b800;
   --warning-text:   #7a5800;
 
+
   /* ── Recent activity tints (.last-event cells) ───────── */
   --allow-bg: rgba(0, 160, 60, 0.15);
   --deny-bg:  rgba(200, 0, 0, 0.13);
@@ -128,6 +129,7 @@ html.dark {
   --warning-bg:     #3a2e00;
   --warning-border: #7a6200;
   --warning-text:   #f5c842;
+
 
   --search-highlight-bg: #4a3800;
   --locate-highlight-bg: #3a3010;
@@ -282,6 +284,49 @@ input[type="search"]::-webkit-search-results-decoration {
   color: var(--warning-text);
   font-size: var(--font-meta);
   font-weight: 500;
+}
+
+.update-banner[hidden] {
+  display: none;
+}
+
+.update-banner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 7px 14px;
+  background: var(--accent);
+  color: var(--on-accent);
+  border-radius: 6px;
+  font-size: var(--font-body);
+  flex-wrap: wrap;
+}
+
+.update-banner-btn[hidden] {
+  display: none;
+}
+
+.update-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  -webkit-appearance: none;
+  appearance: none;
+  box-sizing: border-box;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--on-accent);
+  border-radius: 6px;
+  padding: 2px 10px;
+  font-size: var(--font-body);
+  font-family: inherit;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.update-banner-btn:hover {
+  background: rgba(255, 255, 255, 0.22);
 }
 
 .logout-placeholder {
@@ -476,6 +521,38 @@ input[type="search"]::-webkit-search-results-decoration {
 }
 
 .about-website:hover {
+  text-decoration: underline;
+}
+
+.about-update-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  margin-top: -2px;
+  margin-bottom: 8px;
+  font-size: var(--font-meta);
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.about-update-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.about-update-link:hover {
+  text-decoration: underline;
+}
+
+.about-check-now-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-size: var(--font-meta);
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
   text-decoration: underline;
 }
 
@@ -1058,6 +1135,18 @@ main {
 
 
 @media (max-width: 834px) {
+  .update-banner [data-role="update-banner-text"] {
+    width: 100%;
+  }
+
+  .update-banner {
+    row-gap: 6px;
+  }
+
+  .update-banner-btn:first-of-type {
+    margin-left: 0;
+  }
+
   .undo-widget {
     position: absolute;
     top: 105px;

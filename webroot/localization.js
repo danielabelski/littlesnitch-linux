@@ -19,6 +19,12 @@ const _strings = {
   'btn-add':                          'Add',
   'btn-save':                         'Save',
 
+  // --- Software update banner ---
+  'update-available':      'New Version {$latestVersion} is available (you have {$currentVersion}).',
+  'update-download':       'Download…',
+  'update-snooze':         'Remind me later',
+  'update-skip':           'Skip this version',
+
   // --- Age strings (connections activity column) ---
   'age-now':     'now',
   'age-seconds': '{$n} s ago',
@@ -230,6 +236,12 @@ const _strings = {
   'about-icon-alt':    'Little Snitch for Linux icon',
   'about-main-commit': 'Main commit',
   'about-ebpf-commit': 'eBPF commit',
+  'about-update-newer':    'Version {$version} is available',
+  'about-update-error':    'Error checking for update: {$error}',
+  'about-last-checked':    'last checked: {$time}',
+  'about-last-successful': 'last successful check: {$time}',
+  'about-up-to-date':      'version is up-to-date',
+  'about-check-now':       'Check now',
 
   // --- Logout menu ---
   'logout-btn-label':  'Logout',

@@ -151,12 +151,20 @@
       </div>
     </header>
 
+    <div class="update-banner" data-role="update-banner" hidden>
+      <span data-role="update-banner-text"></span>
+      <a class="update-banner-btn" data-role="update-download-btn" target="_blank" rel="noopener noreferrer" data-i18n="update-download">Download…</a>
+      <button class="update-banner-btn" data-role="update-snooze-btn" type="button" data-i18n="update-snooze">Remind me later</button>
+      <button class="update-banner-btn" data-role="update-skip-btn" type="button" data-i18n="update-skip">Skip this version</button>
+    </div>
+
     <dialog class="about-dialog" id="about-dialog" aria-label="About Little Snitch for Linux" data-i18n-aria-label="about-btn-label">
       <div class="about-dialog-content">
         <button class="about-close-button" type="button" aria-label="Close">×</button>
         <img class="about-icon" src="littlesnitch-192.png" alt="Little Snitch for Linux icon" width="96" height="96" data-i18n-alt="about-icon-alt" />
         <h1 class="about-name" data-i18n="app-title">Little Snitch for Linux</h1>
         <div class="about-version" data-role="about-version"></div>
+        <div class="about-update-info" data-role="about-update-info"></div>
         <div class="about-commits">
           <span class="about-commit-label" data-i18n="about-main-commit">Main commit</span>
           <span class="about-commit-value" data-role="about-main-commit" title="Main commit hash"></span>
