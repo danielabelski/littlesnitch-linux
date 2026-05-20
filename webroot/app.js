@@ -59,7 +59,6 @@
       window.location.host !== ""
         ? `${protocol}//${window.location.host}/stream`
         : "ws://127.0.0.1:3031/stream";
-    tempSURL = null;
     const socket = new WebSocket(socketUrl);
 
     socket.addEventListener("open", () => {
