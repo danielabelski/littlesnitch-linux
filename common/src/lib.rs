@@ -121,6 +121,14 @@ pub fn touch_usize(_v: &mut usize) {
     }
 }
 
+#[inline(always)]
+pub fn touch_u16(_v: &mut u16) {
+    #[cfg(target_arch = "bpf")]
+    unsafe {
+        core::arch::asm!("; {i} = {i}", i = inout(reg) * _v,);
+    }
+}
+
 #[cfg(feature = "user")]
 unsafe impl aya::Pod for StringId {}
 #[cfg(feature = "user")]

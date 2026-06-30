@@ -2,16 +2,14 @@
 // Copyright (C) 2026 Objective Development Software GmbH
 
 use crate::{
-    bpf_string::BpfString,
-    flow_types::VerdictReason,
-    network_filter::{
+    bpf_string::BpfString, flow_types::VerdictReason, network_filter::{
         binary_rule::PortTableEntry,
         blocklist_matching::{blocklist_ipv4_match, blocklist_ipv6_match, blocklist_name_match},
         filter_model::{FilterMetainfo, FilterModel},
         port_table_search::{PortTableSearchTerm, SearchSpecification, SearchTableType},
         rule_page::*,
         rule_types::{DirectionPattern, ExePatternId, ExePatternIdExtension, Protocol},
-    },
+    }, touch_u16,
 };
 
 impl<T: FilterModel + Sized> FilterEngine for T {}
@@ -98,14 +96,30 @@ pub trait FilterEngine: FilterModel + Sized {
 
     /// Given a particular `exe_pattern_id`, evaluate rules matching the executable and
     /// connection.
-    #[inline(never)]
+    #[inline(always)]
     fn evaluate_rules<S: SearchSpecification, Input: FilterEngineInput>(
         &self,
         meta: &FilterMetainfo,
         connection: &Input,
-        exe_pattern_id: ExePatternId,
+        mut exe_pattern_id: ExePatternId,
         search_spec: &mut S,
     ) {
+        // Linux kernel 7.1 improved the eBPF verifier's ability to recognize code paths it has
+        // already verified, which should, in principle, make verification faster. Unfortunately,
+        // it has the opposite effect here: when this function is marked `#[inline(never)]` (as it
+        // previously was), verification becomes 10x slower under Little Snitch.
+        //
+        // We can still benefit from the verifier improvements if we instead force this function
+        // to always be inlined and prevent compiler optimizations on `exe_pattern_id`. We don't
+        // know why this works, but it does.
+        //
+        // Even with this workaround, performance is worse than the previous implementation on
+        // Linux 7.0:
+        // - ~2x slower when running on Linux 7.1 or 7.2
+        // - ~4x slower when running on Linux 6.12 to 7.0
+        // Both are still within the verifier's complexity constraints, so this is acceptable
+        // for now.
+        touch_u16(&mut exe_pattern_id);
         if exe_pattern_id == ExePatternId::none() {
             return;
         }
