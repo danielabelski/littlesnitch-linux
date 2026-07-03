@@ -69,7 +69,9 @@ impl Context {
                 }
             }
         }
-        if properties.remote_name == StringId::none() {
+        // Inbound connections cannot have a DNS name. They arrive spontaneously, without prior
+        // DNS lookup. If we have a name in the cache, that's pure coincidence. Do not use it.
+        if !properties.is_inbound && properties.remote_name == StringId::none() {
             properties.remote_name =
                 name_for_address(&identifier.remote_address, &properties.process_pair);
             if properties.remote_name != StringId::none() {
