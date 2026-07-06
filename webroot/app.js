@@ -246,7 +246,8 @@
     applyTheme(stored);
     updateThemeMenu(stored);
 
-    window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    const darkModeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    darkModeQuery.addEventListener("change", () => {
       if (!localStorage.getItem("theme")) {
         applyTheme(null);
       }
