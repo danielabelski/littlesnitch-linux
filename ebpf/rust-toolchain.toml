@@ -1,0 +1,11 @@
+# Pinned toolchain for building the eBPF programs. The kernel verifier may
+# reject bytecode after changes in the Rust compiler or LLVM, so the exact
+# nightly matters; this pin is the single source of truth.
+#
+# Note: rustup only honors this file when cargo is invoked inside this
+# directory. The nested builds in daemon/build.rs and demo-runner/build.rs
+# run `rustup run <toolchain>`, which ignores rust-toolchain.toml, so they
+# parse the channel from this file and pass it explicitly.
+[toolchain]
+channel = "nightly-2026-07-07"
+components = ["rust-src"]

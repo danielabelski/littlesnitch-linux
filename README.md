@@ -24,15 +24,20 @@ portion is not Open Source.
 ## Prerequisites
 
 1. stable rust toolchains: `rustup toolchain install stable`
-2. nightly rust toolchains: `rustup toolchain install nightly --component rust-src`
-3. bpf-linker: `cargo install bpf-linker`
+2. the pinned nightly toolchain for the eBPF build, e.g.
+   `rustup toolchain install nightly-2026-07-07 --component rust-src`
+   (see `ebpf/rust-toolchain.toml` for the currently pinned version)
+3. bpf-linker: `cargo install bpf-linker --locked` (version 0.10.3 is known to work)
 4. the `clang` C/C++ compiler
 
 Note: eBPF is a bit fragile. The kernel verifier may reject the program
-after changes in the verifier itself or in the Rust compiler. This code is
-known to pass the verifier on Linux kernels 6.12 to 7.0 when compiled with
-Rust 1.93.0-nightly (2d4fa1395 2025-11-12). Other Rust versions may or may
-not work.
+after changes in the verifier itself, in the Rust compiler or in bpf-linker.
+The nightly toolchain used for the eBPF build is therefore pinned in
+`ebpf/rust-toolchain.toml`; the build scripts of the crates embedding the
+eBPF program (demo-runner and the daemon) read the pin from there and pass
+it to `rustup run` explicitly. This code is known to pass the verifier on
+Linux kernels 6.12 to 7.2.0 when compiled with the pinned nightly-2026-07-07
+and bpf-linker 0.10.3. Other versions may or may not work.
 
 ## Build & Run
 
