@@ -29,9 +29,11 @@ function setSelectedConnectionRowId(rowID) {
    Helpers
    ---------------------------------------------------- */
 
-// SI units (1 kB = 1000 bytes), 3 significant figures
+// SI units (1 kB = 1000 bytes), 3 significant figures,
+// but never finer than whole bytes
 function byteCountString(bytes) {
   if (bytes < 1) return '';
+  if (bytes < 100) return (bytes / 1e3).toFixed(3) + ' kB';
   const units = ['kB', 'MB', 'GB', 'TB'];
   const divisors = [1e3, 1e6, 1e9, 1e12];
   let i = units.length - 1;
