@@ -2,14 +2,18 @@
 // Copyright (C) 2026 Objective Development Software GmbH
 
 use crate::{
-    bpf_string::BpfString, flow_types::VerdictReason, network_filter::{
+    bpf_string::BpfString,
+    flow_types::VerdictReason,
+    network_filter::{
         binary_rule::PortTableEntry,
         blocklist_matching::{blocklist_ipv4_match, blocklist_ipv6_match, blocklist_name_match},
         filter_model::{FilterMetainfo, FilterModel},
         port_table_search::{PortTableSearchTerm, SearchSpecification, SearchTableType},
         rule_page::*,
         rule_types::{DirectionPattern, ExePatternId, ExePatternIdExtension, Protocol},
-    }, touch_u16,
+    },
+    repeat::{LoopReturn::LoopContinue, repeat_closure},
+    touch_u16,
 };
 
 impl<T: FilterModel + Sized> FilterEngine for T {}
@@ -89,9 +93,13 @@ pub trait FilterEngine: FilterModel + Sized {
         }
         let mut exe_pattern_ids = [ExePatternId::none(); 3];
         connection.get_exe_pattern_ids(&mut exe_pattern_ids);
-        self.evaluate_rules(meta, connection, exe_pattern_ids[0], search_spec);
-        self.evaluate_rules(meta, connection, exe_pattern_ids[1], search_spec);
-        self.evaluate_rules(meta, connection, exe_pattern_ids[2], search_spec);
+        repeat_closure(3, |i| {
+            if i < 3 {
+                // tell everyone that we adhere to the limits
+                self.evaluate_rules(meta, connection, exe_pattern_ids[i], search_spec);
+            }
+            LoopContinue
+        });
     }
 
     /// Given a particular `exe_pattern_id`, evaluate rules matching the executable and
