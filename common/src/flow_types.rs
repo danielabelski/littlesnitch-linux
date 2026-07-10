@@ -18,6 +18,9 @@ use core::hash::Hash;
 pub const LOCALHOST_ADDRESS: u32 = 0x7f00_0000_u32.to_be(); // 127.0.0.0
 pub const LOCALHOST_MASK: u32 = 0xff00_0000_u32.to_be(); // 255.0.0.0
 
+/// The maximum number of flows that can be tracked in the `ACTIVE_FLOWS` map
+pub const MAX_ACTIVE_FLOWS: u32 = 65536;
+
 #[repr(C)]
 #[derive(Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "user", derive(Copy, Hash))]

@@ -11,8 +11,7 @@ use crate::{
     socket_properties::get_socket_properties,
 };
 use aya_ebpf::{
-    bindings::BPF_F_NO_PREALLOC, helpers::generated::bpf_get_socket_cookie, macros::map,
-    maps::HashMap,
+    bindings::{BPF_F_NO_PREALLOC, BPF_NOEXIST}, helpers::generated::bpf_get_socket_cookie, macros::map, maps::HashMap,
 };
 use common::{
     StringId,
@@ -31,7 +30,7 @@ const REPORT_TCPIP_FRAMES: bool = false;
 
 #[map]
 pub static ACTIVE_FLOWS: HashMap<FlowIdentifier, FlowProperties> =
-    HashMap::with_max_entries(65536, BPF_F_NO_PREALLOC);
+    HashMap::with_max_entries(MAX_ACTIVE_FLOWS, BPF_F_NO_PREALLOC);
 
 impl Context {
     fn update_properties(
@@ -203,7 +202,10 @@ impl Context {
             properties.process_pair.executable_pair.uid = 0;
             self.decide_flow_direction(properties, identifier, &header_infos);
             // ensure we pass by reference, not by value by using `&*`
-            _ = ACTIVE_FLOWS.insert(&*identifier, &*properties, 0);
+            _ = ACTIVE_FLOWS.insert(&*identifier, &*properties, BPF_NOEXIST as _);
+            // The insert above may fail if an other CPU inserts simultaneously. Ignore the error
+            // and fetch either a pointer to the value we inserted or a pointer to the value an
+            // other CPU inserted. Both is correct.
             let Some(properties_ptr) = ACTIVE_FLOWS.get_ptr_mut(&*identifier) else {
                 return Some(Verdict::Allow); // unexpected failure, let it pass
             };
