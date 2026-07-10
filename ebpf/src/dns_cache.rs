@@ -1,22 +1,22 @@
 // SPDX-License-Identifier: GPL-2.0
 // Copyright (C) 2026 Objective Development Software GmbH
 
-use core::cmp;
-
-use aya_ebpf::{helpers::generated::bpf_skb_load_bytes, macros::map, maps::LruHashMap};
-use common::{
-    NanoTime, StringId,
-    bpf_string::BpfString,
-    dns_types::{DnsIpv4Key, DnsIpv6Key, DnsNameKey},
-    flow_types::{IpAddress, LOCALHOST_ADDRESS, LOCALHOST_MASK, ProcessPair},
-    repeat::{LoopReturn, repeat_closure},
-};
-
 use crate::{
     context::{Context, DnsMessageHeader},
     dn_expand::dn_expand,
     strings_cache::{self, identifier_for_string},
 };
+use aya_ebpf::{
+    bindings::BPF_NOEXIST, helpers::generated::bpf_skb_load_bytes, macros::map, maps::LruHashMap,
+};
+use common::{
+    NanoTime, StringId,
+    bpf_string::BpfString,
+    dns_types::{DnsIpv4Key, DnsIpv6Key, DnsNameKey, MAX_DNS_CACHE_ENTRIES},
+    flow_types::{IpAddress, LOCALHOST_ADDRESS, LOCALHOST_MASK, ProcessPair},
+    repeat::{LoopReturn, repeat_closure},
+};
+use core::cmp;
 
 const MAX_QUERY_AGE: i64 = 10 * 1000 * 1000 * 1000; // 10 seconds in nanoseconds
 
@@ -27,16 +27,20 @@ const RR_TYPE_AAAA: u16 = 28;
 const RR_TYPE_CNAME: u16 = 5;
 
 #[map]
-static DNS_QUERIES: LruHashMap<DnsNameKey, NanoTime> = LruHashMap::with_max_entries(8192, 0);
+static DNS_QUERIES: LruHashMap<DnsNameKey, NanoTime> =
+    LruHashMap::with_max_entries(MAX_DNS_CACHE_ENTRIES, 0);
 
 #[map]
-static DNS_CNAMES: LruHashMap<DnsNameKey, StringId> = LruHashMap::with_max_entries(8192, 0);
+static DNS_CNAMES: LruHashMap<DnsNameKey, StringId> =
+    LruHashMap::with_max_entries(MAX_DNS_CACHE_ENTRIES, 0);
 
 #[map]
-static DNS_IPV4ADDR: LruHashMap<DnsIpv4Key, StringId> = LruHashMap::with_max_entries(8192, 0);
+static DNS_IPV4ADDR: LruHashMap<DnsIpv4Key, StringId> =
+    LruHashMap::with_max_entries(MAX_DNS_CACHE_ENTRIES, 0);
 
 #[map]
-static DNS_IPV6ADDR: LruHashMap<DnsIpv6Key, StringId> = LruHashMap::with_max_entries(8192, 0);
+static DNS_IPV6ADDR: LruHashMap<DnsIpv6Key, StringId> =
+    LruHashMap::with_max_entries(MAX_DNS_CACHE_ENTRIES, 0);
 
 pub trait PacketProvider {
     fn len(&self) -> usize;
@@ -120,7 +124,16 @@ impl Context {
                     }
                 }
             }
-            _ = DNS_QUERIES.insert(&name_key, &self.timestamp, 0);
+            // Update existing entries in place instead of re-inserting them. An insert on an
+            // existing key replaces the hash bucket node in the kernel, which can make a
+            // concurrent map iteration in user space restart from the beginning of the map
+            // (see garbage_collect_flows() for details). The BPF_NOEXIST insert may fail if
+            // another CPU inserts simultaneously; then that CPU's equally valid value wins.
+            if let Some(time_ptr) = DNS_QUERIES.get_ptr_mut(&name_key) {
+                unsafe { *time_ptr = self.timestamp };
+            } else {
+                _ = DNS_QUERIES.insert(&name_key, &self.timestamp, BPF_NOEXIST as _);
+            }
         } else {
             let sane_answer_count = cmp::min(64, dns_msg_header.answer_count) as u64;
             repeat_closure(sane_answer_count as _, |_| {
@@ -245,7 +258,13 @@ impl Context {
         // Ignore loopback addresses in response. That's common with PiHole and the frontend
         // would show the blocked name as remote for localhost connections.
         if address & LOCALHOST_MASK != LOCALHOST_ADDRESS && address != 0 {
-            _ = DNS_IPV4ADDR.insert(&DnsIpv4Key { address }, &query_name, 0);
+            // Update in place to avoid node replacement, see comment in process_dns_packet().
+            let key = DnsIpv4Key { address };
+            if let Some(name_ptr) = DNS_IPV4ADDR.get_ptr_mut(&key) {
+                unsafe { *name_ptr = query_name };
+            } else {
+                _ = DNS_IPV4ADDR.insert(&key, &query_name, BPF_NOEXIST as _);
+            }
         }
         Some(())
     }
@@ -266,7 +285,13 @@ impl Context {
         // would show the blocked name as remote for localhost connections.
         // IPv6 loopback is ::1 or ::0 (the unspecified address).
         if address[0] | address[1] | address[2] | (address[3] & !1u32.to_be()) != 0 {
-            _ = DNS_IPV6ADDR.insert(&DnsIpv6Key { address }, &query_name, 0);
+            // Update in place to avoid node replacement, see comment in process_dns_packet().
+            let key = DnsIpv6Key { address };
+            if let Some(name_ptr) = DNS_IPV6ADDR.get_ptr_mut(&key) {
+                unsafe { *name_ptr = query_name };
+            } else {
+                _ = DNS_IPV6ADDR.insert(&key, &query_name, BPF_NOEXIST as _);
+            }
         }
         Some(())
     }
@@ -284,7 +309,12 @@ impl Context {
         // ignore len, we anyway don't know what to do if we exceed it
         let cname = identifier_for_string(string_buffer);
         let cname_key = DnsNameKey { name: cname };
-        _ = DNS_CNAMES.insert(&cname_key, &query_name, 0);
+        // Update in place to avoid node replacement, see comment in process_dns_packet().
+        if let Some(name_ptr) = DNS_CNAMES.get_ptr_mut(&cname_key) {
+            unsafe { *name_ptr = query_name };
+        } else {
+            _ = DNS_CNAMES.insert(&cname_key, &query_name, BPF_NOEXIST as _);
+        }
         Some(())
     }
 }

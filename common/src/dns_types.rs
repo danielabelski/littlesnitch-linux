@@ -3,6 +3,9 @@
 
 use crate::StringId;
 
+/// Maximum number of entries in each of the four DNS cache maps.
+pub const MAX_DNS_CACHE_ENTRIES: u32 = 8192;
+
 // We cannot make the DNS cache fully process-specific because many programs `fork()` after
 // doing a lookup. We could make it executable-specific or even only specific on the
 // executable of the parent process (if any). For the moment, we decide to make it completely
