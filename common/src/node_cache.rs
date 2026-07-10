@@ -9,6 +9,8 @@ use core::num::NonZeroU64;
 
 pub const MAX_PATH_COMPONENTS: usize = 256;
 
+pub const MAX_TRACKED_PIDS: u32 = 65536;    // maximum number of entries in PID_TO_NODE_ID map
+
 #[cfg_attr(feature = "user", derive(Copy))]
 #[derive(PartialEq, Eq, Hash, Clone)]
 #[repr(C)]

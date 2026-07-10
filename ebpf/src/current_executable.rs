@@ -7,6 +7,7 @@ use crate::{
     node_cache::{NodeCache, Path},
 };
 use aya_ebpf::{
+    bindings::BPF_NOEXIST,
     helpers::{bpf_get_current_pid_tgid, generated::bpf_get_current_task_btf},
     macros::map,
     maps::{HashMap, LruHashMap},
@@ -14,7 +15,7 @@ use aya_ebpf::{
 use common::{
     NodeFeatures,
     flow_types::ProcessPair,
-    node_cache::{NodeCacheTrait, NodeId},
+    node_cache::{MAX_TRACKED_PIDS, NodeCacheTrait, NodeId},
     repeat::{LoopReturn, repeat_closure},
 };
 use core::{mem::transmute, ptr};
@@ -23,7 +24,7 @@ use core::{mem::transmute, ptr};
 static NODE_FEATURES: HashMap<NodeId, NodeFeatures> = HashMap::with_max_entries(256, 0);
 
 #[map]
-static PID_TO_NODE_ID: HashMap<i32, NodeId> = HashMap::with_max_entries(65536, 0);
+static PID_TO_NODE_ID: HashMap<i32, NodeId> = HashMap::with_max_entries(MAX_TRACKED_PIDS, 0);
 
 #[map]
 static RUNNING_EXEC_PARAMS: LruHashMap<i32, NodeId> = LruHashMap::with_max_entries(512, 0);
@@ -77,7 +78,14 @@ pub fn report_sched_process_exec(old_pid: i32, new_pid: i32) {
         // bprm_execve() succeeded, store the result in PID_TO_NODE_ID
         // node_id has been stored for old_pid
         if let Some(node_id) = RUNNING_EXEC_PARAMS.get(&old_pid) {
-            _ = PID_TO_NODE_ID.insert(&new_pid, node_id, 0);
+            // If there is already an entry for `new_pid`, update instead of inserting a new one
+            // and deleting the old. This way we don't disturb iterations over the map in
+            // user space.
+            if let Some(ptr) = PID_TO_NODE_ID.get_ptr_mut(&new_pid) {
+                *ptr = *node_id;
+            } else {
+                _ = PID_TO_NODE_ID.insert(&new_pid, node_id, 0);
+            }
             _ = RUNNING_EXEC_PARAMS.remove(&old_pid);
         }
     }
@@ -118,7 +126,9 @@ impl task_struct {
         } else if let Some(path) = self.path()
             && let Some(node_id) = node_cache.node_id_for_path(Path::new(&path))
         {
-            _ = PID_TO_NODE_ID.insert(&pid, &node_id, 0);
+            // We can use `BPF_NOEXIST` here because two concurrently running
+            // `node_cache.node_id_for_path()` return the same `node_id`.
+            _ = PID_TO_NODE_ID.insert(&pid, &node_id, BPF_NOEXIST as _);
             Some(node_id)
         } else {
             None
